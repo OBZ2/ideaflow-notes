@@ -246,7 +246,10 @@ addEventListener('keydown',e=>{if(e.key==='Escape')$('#drawer').classList.remove
 
 /* ============ data loading ============ */
 function parseJsonl(txt){const merged=new Map();for(const line of txt.split('\n')){const l=line.trim();if(!l)continue;let d;try{d=JSON.parse(l)}catch{continue}if(!d.id)continue;
-  const cur=merged.get(d.id)||{};for(const[k,v]of Object.entries(d))if(v!=null)cur[k]=v;merged.set(d.id,cur)}               // later lines win per field
+  let key=d.id;const prev=merged.get(key);
+  if(prev&&d.text&&prev.text&&d.text!==prev.text){                          // id collision (old phone Shortcut always wrote 2147483647): separate note
+    key=d.id+'~'+(d.ts||'');for(let n=2;merged.has(key);n++)key=d.id+'~'+(d.ts||'')+'~'+n;d.id=key}
+  const cur=merged.get(key)||{};for(const[k,v]of Object.entries(d))if(v!=null)cur[k]=v;merged.set(key,cur)}               // same id + same/no text = update: later lines win per field
   return[...merged.values()].filter(d=>d.text)}
 async function fetchEntries(){for(const u of DATA_URLS){try{const r=await fetch(u+(u.includes('?')?'&':'?')+'t='+Date.now(),{cache:'no-store'});if(!r.ok)continue;
   return u.endsWith('.jsonl')?parseJsonl(await r.text()):await r.json()}catch{}}throw new Error('could not load entries')}
