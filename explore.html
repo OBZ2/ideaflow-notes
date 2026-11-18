@@ -181,13 +181,20 @@ if(state.space==='e'){setSpace()}runSearch();
 async function semanticScores(q){const[v]=await embedTexts([q]);const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
 const tokRe=q=>{const t=toks(q);return t.length?new RegExp('('+t.map(reEsc).join('|')+')','giu'):null};
 
-/* ---- clustering helper: always CLUSTER_K clusters, returns them all ranked by query affinity ---- */
-function clusterCandidates(q,k=CLUSTER_K){
+/* ---- query vector in the SAME space the clustering uses (async only for embeddings) ---- */
+async function qvecInSpace(q){
+  const s=activeSpace();
+  if(s==='e'){const[v]=await embedTexts([q]);return denseToMap(v)}
+  return qvecTfidf(q);
+}
+
+/* ---- clustering helper: always CLUSTER_K clusters, ranked by query affinity in the active space ---- */
+async function clusterCandidates(q,k=CLUSTER_K){
   const idx=E.map(e=>e.i);
   if(idx.length<=8) return [{items:idx,terms:topTerms(idx),s:1}];
   const kk=Math.min(k,idx.length);
   const groups=kmeans(idx,kk,idx.length*13+7);
-  const qv=qvecTfidf(q);
+  const qv=await qvecInSpace(q);
   const scored=groups.map(g=>{
     const c=new Map();
     for(const i of g)for(const [t,v]of E[i].v)c.set(t,(c.get(t)||0)+v);
@@ -201,7 +208,7 @@ const METHODS={
 tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
 run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
 cluster:{name:'Cluster → TF-IDF',help:'Builds 12 clusters from the current vectors, ranks them by query similarity, then TF-IDF ranks notes inside every cluster. Expand a cluster to inspect it.',
-run:q=>{const v=qvecTfidf(q);const clusters=clusterCandidates(q);const list=clusters.flatMap(c=>c.items.map(i=>({i,s:dot(v,tfVec(E[i]))}))).filter(r=>r.s>.03);return{list,clusters}},hl:tokRe},
+run:async q=>{const v=qvecTfidf(q);const clusters=await clusterCandidates(q);const list=clusters.flatMap(c=>c.items.map(i=>({i,s:dot(v,tfVec(E[i]))}))).filter(r=>r.s>.03);return{list,clusters}},hl:tokRe},
 semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
 run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
 hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
