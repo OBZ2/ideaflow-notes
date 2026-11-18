@@ -45,16 +45,6 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 th{color:var(--mut);font-weight:500}
 .flash{max-width:640px;margin:32px auto;text-align:center}
 .flash.card{font-size:20px;padding:40px 24px;cursor:default}
-.cluster{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
-.cluster>summary{padding:10px 14px;cursor:pointer;list-style:none;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.cluster>summary::-webkit-details-marker{display:none}
-.cluster>summary::before{content:'▸';color:var(--mut);font-size:12px;transition:transform .15s}
-.cluster[open]>summary::before{transform:rotate(90deg)}
-.cluster .terms{font-weight:600;word-break:break-word}
-.cluster .cmeta{color:var(--mut);font-size:11px;display:flex;gap:10px;align-items:center;margin-left:auto;font-variant-numeric:tabular-nums}
-.cluster .qsim{color:var(--acc);font-weight:600}
-.cluster .body{padding:4px 14px 12px;border-top:1px solid var(--line)}
-.cluster .body .card{margin-top:8px}
 </style>
 </head>
 <body>
@@ -78,9 +68,10 @@ th{color:var(--mut);font-weight:500}
 "use strict";
 /* ============ config ============ */
 const MODEL='Xenova/all-MiniLM-L6-v2';// 384-dim sentence embeddings
-const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';// runs the model in this browser
+const LLM='onnx-community/Qwen2.5-0.5B-Instruct';// small chat model for reranking, runs in this browser
+const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';// runs the models in this browser
 const DATA_URLS=['entries.jsonl','/api/entries'];// Pages: next to this file. Local: server.py
-const CLUSTER_K=12;// fixed number of clusters built per query
+const RERANK_N=20;// how many TF-IDF hits get sent to the LLM
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -101,6 +92,7 @@ const denseToMap=a=>new Map(Array.from(a,(x,k)=>[k,x]));
 let E=[],M={},cache={};
 const state={q:'',method:store.get('method','tfidf'),space:store.get('space','e'),sort:store.get('sort','rel'),view:store.get('view','list'),hide:store.get('hide','1')==='1'};
 const EMB={ready:false,pipe:null,count:0};
+const LLMST={ready:false,gen:null,loading:false};
 function build(raw){
 E=raw.map((e,i)=>({...e,i,t:toks(e.text),g:grams(e.text),d:new Date(e.ts),h:fnv(e.text)}));
 const N=E.length,dfW=new Map(),dfG=new Map();
@@ -122,7 +114,7 @@ $('#space').querySelector('[value=e]').textContent='vectors: embeddings'+(EMB.re
 }
 const neighbors=(i,k=10)=>{const r=[];for(let j=0;j<M.N;j++)if(j!==i)r.push([j,M.S[i*M.N+j]]);return r.sort((a,b)=>b[1]-a[1]).slice(0,k)};
 function topTerms(idx,n=3){const m=new Map();for(const i of idx)for(const [t,v]of E[i].vw)m.set(t,(m.get(t)||0)+v);return[...m].sort((a,b)=>b[1]-a[1]).slice(0,n).map(x=>x[0])}
-/* ============ topic tree: recursive spherical k-means ============ */
+/* ============ topic tree: recursive spherical k-means (view only) ============ */
 function kmeans(idx,k,seed){
 const r=rng(seed);const C=[E[idx[Math.floor(r()*idx.length)]].v];
 while(C.length<k){let best=-1,bv=9;for(const i of idx){let m=-1;for(const c of C)m=Math.max(m,dot(E[i].v,c));if(m<bv){bv=m;best=i}}C.push(E[best].v)}
@@ -177,38 +169,55 @@ EMB.ready=true;EMB.count=todo.length;
 embStatus(`embeddings ✓ ${E.length} (${todo.length} new${todo.length?'':' — all from cache'})`);
 if(state.space==='e'){setSpace()}runSearch();
 }
+/* ============ LLM reranker (in-browser, Transformers.js) ============ */
+async function getLLM(){
+if(LLMST.gen)return LLMST.gen;
+LLMST.loading=true;embStatus('loading reranker model…',true);
+const{pipeline,env}=await import(TJS);env.allowLocalModels=false;
+const gen=await pipeline('text-generation',LLM,{dtype:'q4'});
+LLMST.gen=gen;LLMST.ready=true;LLMST.loading=false;
+embStatus('reranker ✓');
+return gen;
+}
+function buildPrompt(q,hits){
+const lines=hits.map((h,i)=>`${i+1}. ${E[h.i].text.replace(/\s+/g,' ').slice(0,220)}`).join('\n');
+return `<|im_start|>system
+You rank notes by how well they answer a search query. Reply with ONLY the numbers in best-first order, comma separated, no text.
+<|im_end|>
+<|im_start|>user
+Query: ${q}
+
+Notes:
+${lines}
+<|im_end|>
+<|im_start|>assistant
+`;
+}
+function parseOrder(txt,n){
+const seen=new Set(),out=[];
+for(const m of txt.matchAll(/\d+/g)){const k=+m[0]-1;if(k>=0&&k<n&&!seen.has(k)){seen.add(k);out.push(k)}}
+for(let k=0;k<n;k++)if(!seen.has(k))out.push(k);// append anything the model dropped
+return out;
+}
+async function llmRerank(q,hits){
+const gen=await getLLM();
+const out=await gen(buildPrompt(q,hits),{max_new_tokens:64,do_sample:false});
+const txt=out[0].generated_text.split('<|im_start|>assistant').pop()||'';
+const order=parseOrder(txt,hits.length);
+return order.map((k,rank)=>({...hits[k],rank}));
+}
+
 /* ============ search methods ============ */
 async function semanticScores(q){const[v]=await embedTexts([q]);const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
 const tokRe=q=>{const t=toks(q);return t.length?new RegExp('('+t.map(reEsc).join('|')+')','giu'):null};
 
-/* ---- query vector in the SAME space the clustering uses (async only for embeddings) ---- */
-async function qvecInSpace(q){
-  const s=activeSpace();
-  if(s==='e'){const[v]=await embedTexts([q]);return denseToMap(v)}
-  return qvecTfidf(q);
-}
-
-/* ---- clustering helper: always CLUSTER_K clusters, ranked by query affinity in the active space ---- */
-async function clusterCandidates(q,k=CLUSTER_K){
-  const idx=E.map(e=>e.i);
-  if(idx.length<=8) return [{items:idx,terms:topTerms(idx),s:1}];
-  const kk=Math.min(k,idx.length);
-  const groups=kmeans(idx,kk,idx.length*13+7);
-  const qv=await qvecInSpace(q);
-  const scored=groups.map(g=>{
-    const c=new Map();
-    for(const i of g)for(const [t,v]of E[i].v)c.set(t,(c.get(t)||0)+v);
-    norm(c);
-    return {items:g,terms:topTerms(g,5),s:dot(qv,c)};
-  }).sort((a,b)=>b.s-a.s);
-  return scored;
-}
-
 const METHODS={
 tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
 run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
-cluster:{name:'Cluster → TF-IDF',help:'Builds 12 clusters from the current vectors, ranks them by query similarity, then TF-IDF ranks notes inside every cluster. Expand a cluster to inspect it.',
-run:async q=>{const v=qvecTfidf(q);const clusters=await clusterCandidates(q);const list=clusters.flatMap(c=>c.items.map(i=>({i,s:dot(v,tfVec(E[i]))}))).filter(r=>r.s>.03);return{list,clusters}},hl:tokRe},
+rerank:{name:'TF-IDF → LLM rerank',help:'TF-IDF picks the top 20, then a small in-browser LLM reorders them by how well they answer the query. Slower, smarter.',needsLLM:true,
+run:async q=>{const v=qvecTfidf(q);const hits=E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s).slice(0,RERANK_N);
+if(!hits.length)return hits;const ranked=await llmRerank(q,hits);
+return ranked.map((r,k)=>({i:r.i,s:1-(k/ranked.length)}))},hl:tokRe},
 semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
 run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
 hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
@@ -216,17 +225,16 @@ run:async q=>{const v=qvecTfidf(q);const sem=await semanticScores(q);return sem.
 similar:{name:'Similar to note (@id)',help:'Nearest notes to one note, using the vectors setting. Click ≈ on any note.',
 run:q=>{const id=q.replace(/^@/,'').trim();const e=E.find(x=>x.id===id);if(!e)return[];return[{i:e.i,s:1.0001},...neighbors(e.i,40).filter(x=>x[1]>.02).map(([j,s])=>({i:j,s}))]},hl:()=>null},
 };
-let R={active:false,list:[],hit:new Set(),score:new Map(),hl:null,max:1,clusters:null},searchGen=0;
+let R={active:false,list:[],hit:new Set(),score:new Map(),hl:null,max:1},searchGen=0;
 async function runSearch(){
 const my=++searchGen;const m=METHODS[state.method];const q=state.q.trim();
 if(m.needsEmb&&q&&!EMB.ready){$('#stat').textContent='waiting for embeddings…';return}
-const t0=performance.now();let res,active=!!q,clusters=null;
+const t0=performance.now();let res,active=!!q;
 try{res=q?await m.run(q):E.map(e=>({i:e.i,s:0}))}catch(err){console.warn(err);res=[]}
 if(my!==searchGen)return;// a newer keystroke won
-if(res&&!Array.isArray(res)){clusters=res.clusters;res=res.list}
 const ms=performance.now()-t0;
 const s=state.sort;res.sort(s==='new'?(a,b)=>E[b.i].d-E[a.i].d:s==='old'?(a,b)=>E[a.i].d-E[b.i].d:(a,b)=>b.s-a.s||E[b.i].d-E[a.i].d);
-R={active,list:res,hit:new Set(res.map(r=>r.i)),score:new Map(res.map(r=>[r.i,r])),hl:active?m.hl(q):null,max:Math.max(1e-9,...res.map(r=>r.s)),clusters:active?clusters:null};
+R={active,list:res,hit:new Set(res.map(r=>r.i)),score:new Map(res.map(r=>[r.i,r])),hl:active?m.hl(q):null,max:Math.max(1e-9,...res.map(r=>r.s))};
 $('#stat').textContent=`${active?res.length+' / ':''}${E.length} notes · ${ms.toFixed(1)} ms`;
 render();
 }
@@ -236,23 +244,13 @@ while((m=h.exec(t))){if(!m[0]){h.lastIndex++;continue}o+=esc(t.slice(last,m.inde
 /* ============ views ============ */
 let teardown=null;
 const VIEWS={list:{name:'List',fn:listView},topic:{name:'Topic tree',fn:m=>treeView(m,cache.topic)},time:{name:'Time tree',fn:m=>treeView(m,timeTree())},cards:{name:'Flashcards',fn:cards}};
-function render(){teardown?.();teardown=null;const m=$('#main');m.innerHTML='';(R.clusters?clustersView:(VIEWS[state.view]||VIEWS.list).fn)(m)}
+function render(){teardown?.();teardown=null;const m=$('#main');m.innerHTML='';(VIEWS[state.view]||VIEWS.list).fn(m)}
 function card(e){const r=R.score.get(e.i),w=R.active&&r?Math.max(4,100*r.s/R.max):0;
 return`<div class="card" data-i="${e.i}"><div class="t">${hlText(e)}</div><div class="meta"><span>${fmtD(e.d)}</span><span>${esc(e.source||'')}</span><span>${esc(e.status||'')}</span>${e.project?`<span>${esc(e.project)}</span>`:''}${R.active&&r?`<span>score ${(+r.s).toFixed(3)}</span>`:''}<button class="sim" data-sim="${esc(e.id)}">≈ similar</button></div>${w?`<div class="bar" style="width:${w}%"></div>`:''}</div>`}
 function listView(m){const list=R.list;let n=0;const box=document.createElement('div');box.className='pad';m.append(box);
 const more=()=>{box.insertAdjacentHTML('beforeend',list.slice(n,n+150).map(r=>card(E[r.i])).join(''));n+=150;if(n<list.length)box.insertAdjacentHTML('beforeend',`<button data-more>show more (${list.length-n})</button>`)};
 box.addEventListener('click',ev=>{if(ev.target.matches('[data-more]')){ev.target.remove();more()}});
 if(list.length)more();else box.innerHTML='<p class="hint">no matches</p>'}
-function clustersView(m){
-const wrap=document.createElement('div');wrap.className='pad';m.append(wrap);
-wrap.insertAdjacentHTML('beforeend',`<p class="hint">${R.clusters.length} clusters, ranked by similarity to the query — expand any to inspect members (ranked by TF-IDF).</p>`);
-R.clusters.forEach((c,ci)=>{
-const det=document.createElement('details');det.className='cluster';det.open=ci===0;
-const members=c.items.map(i=>({i,s:R.score.get(i)?.s||0})).sort((a,b)=>b.s-a.s);
-det.innerHTML=`<summary><span class="terms">${esc(c.terms.join(' · '))||'(no terms)'}</span><span class="cmeta"><span class="qsim">sim ${c.s.toFixed(3)}</span><span>${c.items.length} notes</span></span></summary><div class="body">${members.length?members.map(r=>card(E[r.i])).join(''):'<p class="hint">no members above threshold</p>'}</div>`;
-wrap.append(det);
-});
-}
 function treeView(m,root){
 const div=document.createElement('div');div.className='pad tree';m.append(div);
 const leaf=i=>`<li><span class="leaf ${isHit(i)?'':'miss'}" data-i="${i}">${hlText(E[i])}</span></li>`;
@@ -307,12 +305,12 @@ $('#method').onchange=e=>{setMethod(e.target.value);runSearch()};
 $('#space').value=state.space;$('#space').onchange=e=>{state.space=e.target.value;store.set('space',state.space);setSpace();runSearch()};
 $('#sort').value=state.sort;$('#sort').onchange=e=>{state.sort=e.target.value;store.set('sort',state.sort);runSearch()};
 $('#hide').checked=state.hide;$('#hide').onchange=e=>{state.hide=e.target.checked;store.set('hide',state.hide?'1':'0');render()};
-let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsEmb?300:80)};
+let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsLLM?500:METHODS[state.method].needsEmb?300:80)};
 $('#q').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(deb);runSearch()}};
 $('#reload').onclick=async()=>{try{await fetch('/api/pull',{method:'POST'})}catch{}load()};
 setMethod(state.method in METHODS?state.method:'tfidf');
 state.view=state.view in VIEWS?state.view:'list';document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===state.view));
-window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},state,setView,setMethod,runSearch,idb};
+window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},getLLM(){return LLMST},state,setView,setMethod,runSearch,idb};
 load();
 </script>
 </body>
