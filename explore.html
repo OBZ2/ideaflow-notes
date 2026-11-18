@@ -6,12 +6,12 @@
 <title>Idea Explorer</title>
 <style>
 :root{--bg:#f7f7f5;--panel:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#e3e3e0;--acc:#3b5bdb;--hl:#ffe58a;--hlfg:#1d1d1f}
-@media (prefers-color-scheme:dark){:root{--bg:#141416;--panel:#1d1d21;--fg:#ececf0;--mut:#9a9aa3;--line:#2e2e34;--acc:#7c95ff;--hl:#6b5a12;--hlfg:#fff3c4}}
+@media(prefers-color-scheme:dark){:root{--bg:#141416;--panel:#1d1d21;--fg:#ececf0;--mut:#9a9aa3;--line:#2e2e34;--acc:#7c95ff;--hl:#6b5a12;--hlfg:#fff3c4}}
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column}
 header{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;gap:8px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-input[type=search]{flex:1 1 240px;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:16px}
+input[type=search]{flex:1 240px;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:16px}
 select,button{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:13px;cursor:pointer}
 button:hover{border-color:var(--acc)}
 .hint{color:var(--mut);font-size:12px}
@@ -23,7 +23,7 @@ nav button.on{background:var(--acc);color:#fff}
 main{flex:1;overflow:auto;min-height:0}
 .pad{padding:12px 16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
-.card .t{white-space:pre-wrap;word-break:break-word}
+.card.t{white-space:pre-wrap;word-break:break-word}
 .meta{color:var(--mut);font-size:11px;display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;align-items:center}
 .bar{height:3px;background:var(--acc);border-radius:2px;opacity:.6;margin-top:6px}
 mark{background:var(--hl);color:var(--hlfg);border-radius:2px}
@@ -33,8 +33,8 @@ mark{background:var(--hl);color:var(--hlfg);border-radius:2px}
 .tree li{margin:2px 0}
 .node{cursor:pointer;user-select:none;padding:2px 4px;border-radius:4px;display:inline-flex;gap:6px;align-items:baseline}
 .node:hover{background:var(--line)}
-.node .c{color:var(--mut);font-size:11px;font-variant-numeric:tabular-nums}
-.node.hit .c{color:var(--acc);font-weight:600}
+.node.c{color:var(--mut);font-size:11px;font-variant-numeric:tabular-nums}
+.node.hit.c{color:var(--acc);font-weight:600}
 .leaf{padding:3px 6px;border-radius:6px;cursor:pointer;display:block;word-break:break-word}
 .leaf:hover{background:var(--line)}
 .leaf.miss{opacity:.35}
@@ -44,22 +44,22 @@ mark{background:var(--hl);color:var(--hlfg);border-radius:2px}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top;font-size:12px}
 th{color:var(--mut);font-weight:500}
 .flash{max-width:640px;margin:32px auto;text-align:center}
-.flash .card{font-size:20px;padding:40px 24px;cursor:default}
+.flash.card{font-size:20px;padding:40px 24px;cursor:default}
 </style>
 </head>
 <body>
 <header>
-  <div class="row">
-    <input id="q" type="search" placeholder="search ideas…" autocomplete="off">
-    <select id="method" title="search method"></select>
-    <select id="space" title="vectors used for similar-to and the topic tree">
-      <option value="w">vectors: words</option><option value="g">vectors: char 3-grams</option><option value="h">vectors: hybrid</option><option value="e">vectors: embeddings</option>
-    </select>
-    <select id="sort"><option value="rel">sort: relevance</option><option value="new">sort: newest</option><option value="old">sort: oldest</option></select>
-    <label class="hint"><input type="checkbox" id="hide" checked> hide non-matches</label>
-    <button id="reload" title="re-fetch entries.jsonl">⟳</button>
-  </div>
-  <div class="row"><span class="hint" id="help"></span><span id="emb"></span><span class="stat" id="stat"></span></div>
+<div class="row">
+<input id="q" type="search" placeholder="search ideas…" autocomplete="off">
+<select id="method" title="search method"></select>
+<select id="space" title="vectors used for similar-to and the topic tree">
+<option value="w">vectors: words</option><option value="g">vectors: char 3-grams</option><option value="h">vectors: hybrid</option><option value="e">vectors: embeddings</option>
+</select>
+<select id="sort"><option value="rel">sort: relevance</option><option value="new">sort: newest</option><option value="old">sort: oldest</option></select>
+<label class="hint"><input type="checkbox" id="hide" checked> hide non-matches</label>
+<button id="reload" title="re-fetch entries.jsonl">⟳</button>
+</div>
+<div class="row"><span class="hint" id="help"></span><span id="emb"></span><span class="stat" id="stat"></span></div>
 </header>
 <nav id="views"></nav>
 <main id="main"></main>
@@ -67,10 +67,11 @@ th{color:var(--mut);font-weight:500}
 <script type="module">
 "use strict";
 /* ============ config ============ */
-const MODEL='Xenova/all-MiniLM-L6-v2';                                  // 384-dim sentence embeddings
-const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';   // runs the model in this browser
-const DATA_URLS=['entries.jsonl','/api/entries'];                          // Pages: next to this file. Local: server.py
-
+const MODEL='Xenova/all-MiniLM-L6-v2';// 384-dim sentence embeddings
+const LLM='onnx-community/Qwen2.5-0.5B-Instruct';// small chat model for reranking, runs in this browser
+const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';// runs the models in this browser
+const DATA_URLS=['entries.jsonl','/api/entries'];// Pages: next to this file. Local: server.py
+const RERANK_N=20;// how many TF-IDF hits get sent to the LLM
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -79,188 +80,221 @@ const store={get(k,d){try{return localStorage.getItem('ix.'+k)??d}catch{return d
 function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 function fnv(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193)}return(h>>>0).toString(36)}
 const fmtD=d=>isNaN(d)?'':d.toLocaleString(undefined,{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-
 /* ============ TF-IDF model ============ */
 const STOP=new Set(("a an the and or but if of to in on at for with from by is are was were be been being it its this that these those i im me my we our you your he she they them their as so not no do does did dont have has had will would can could should just about into than then there here what which who when where why how all any some more most other such only own same too very also get got make like want need use using thing things one way new idea maybe really").split(" "));
 const toks=s=>(s.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]).filter(w=>w.length>1&&!STOP.has(w));
 function grams(s){s=' '+s.toLowerCase().replace(/\s+/g,' ')+' ';const g=[];for(let i=0;i<s.length-2;i++)g.push(s.slice(i,i+3));return g}
-function norm(m){let n=0;for(const v of m.values())n+=v*v;n=Math.sqrt(n);if(n)for(const[t,v]of m)m.set(t,v/n);return m}
-function vec(arr,idf){const m=new Map();for(const t of arr)m.set(t,(m.get(t)||0)+1);for(const[t,c]of m)m.set(t,(1+Math.log(c))*idf(t));return norm(m)}
-function mix(a,b){const m=new Map();for(const[t,v]of a)m.set('w:'+t,v);for(const[t,v]of b)m.set('g:'+t,v*.7);return norm(m)}
-function dot(a,b){if(a.size>b.size)[a,b]=[b,a];let s=0;for(const[t,v]of a){const u=b.get(t);if(u)s+=v*u}return s}
+function norm(m){let n=0;for(const v of m.values())n+=v*v;n=Math.sqrt(n);if(n)for(const [t,v]of m)m.set(t,v/n);return m}
+function vec(arr,idf){const m=new Map();for(const t of arr)m.set(t,(m.get(t)||0)+1);for(const [t,c]of m)m.set(t,(1+Math.log(c))*idf(t));return norm(m)}
+function mix(a,b){const m=new Map();for(const [t,v]of a)m.set('w:'+t,v);for(const [t,v]of b)m.set('g:'+t,v*.7);return norm(m)}
+function dot(a,b){if(a.size>b.size)[a,b]=[b,a];let s=0;for(const [t,v]of a){const u=b.get(t);if(u)s+=v*u}return s}
 const denseToMap=a=>new Map(Array.from(a,(x,k)=>[k,x]));
-
 let E=[],M={},cache={};
 const state={q:'',method:store.get('method','tfidf'),space:store.get('space','e'),sort:store.get('sort','rel'),view:store.get('view','list'),hide:store.get('hide','1')==='1'};
 const EMB={ready:false,pipe:null,count:0};
-
+const LLMST={ready:false,gen:null,loading:false};
 function build(raw){
-  E=raw.map((e,i)=>({...e,i,t:toks(e.text),g:grams(e.text),d:new Date(e.ts),h:fnv(e.text)}));
-  const N=E.length,dfW=new Map(),dfG=new Map();
-  for(const e of E){for(const w of new Set(e.t))dfW.set(w,(dfW.get(w)||0)+1);for(const g of new Set(e.g))dfG.set(g,(dfG.get(g)||0)+1)}
-  const idf=df=>t=>Math.log((N+1)/((df.get(t)||0)+1))+1;          // recomputed from counts on every load
-  M={N,idfW:idf(dfW),idfG:idf(dfG)};
-  for(const e of E){e.vw=vec(e.t,M.idfW);e.vg=vec(e.g,M.idfG);e.vh=mix(e.vw,e.vg)}
-  EMB.ready=false;
+E=raw.map((e,i)=>({...e,i,t:toks(e.text),g:grams(e.text),d:new Date(e.ts),h:fnv(e.text)}));
+const N=E.length,dfW=new Map(),dfG=new Map();
+for(const e of E){for(const w of new Set(e.t))dfW.set(w,(dfW.get(w)||0)+1);for(const g of new Set(e.g))dfG.set(g,(dfG.get(g)||0)+1)}
+const idf=df=>t=>Math.log((N+1)/((df.get(t)||0)+1))+1;// recomputed from counts on every load
+M={N,idfW:idf(dfW),idfG:idf(dfG)};
+for(const e of E){e.vw=vec(e.t,M.idfW);e.vg=vec(e.g,M.idfG);e.vh=mix(e.vw,e.vg)}
+EMB.ready=false;
 }
 const activeSpace=()=>state.space==='e'&&!EMB.ready?'h':state.space;
 function qvecTfidf(q){const s=activeSpace()==='e'?'h':activeSpace();const w=vec(toks(q),M.idfW),g=vec(grams(q),M.idfG);return s==='w'?w:s==='g'?g:mix(w,g)}
 const tfVec=e=>{const s=activeSpace()==='e'?'h':activeSpace();return e['v'+s]};
 function setSpace(){
-  const s=activeSpace();for(const e of E)e.v=e['v'+s];
-  const N=E.length,S=new Float32Array(N*N);
-  for(let i=0;i<N;i++){S[i*N+i]=1;for(let j=i+1;j<N;j++){const v=dot(E[i].v,E[j].v);S[i*N+j]=S[j*N+i]=v}}
-  M.S=S;cache={topic:topicTree(E.map(e=>e.i),0)};
-  $('#space').querySelector('[value=e]').textContent='vectors: embeddings'+(EMB.ready?'':' (loading…)');
+const s=activeSpace();for(const e of E)e.v=e['v'+s];
+const N=E.length,S=new Float32Array(N*N);
+for(let i=0;i<N;i++){S[i*N+i]=1;for(let j=i+1;j<N;j++){const v=dot(E[i].v,E[j].v);S[i*N+j]=S[j*N+i]=v}}
+M.S=S;cache={topic:topicTree(E.map(e=>e.i),0)};
+$('#space').querySelector('[value=e]').textContent='vectors: embeddings'+(EMB.ready?'':' (loading…)');
 }
 const neighbors=(i,k=10)=>{const r=[];for(let j=0;j<M.N;j++)if(j!==i)r.push([j,M.S[i*M.N+j]]);return r.sort((a,b)=>b[1]-a[1]).slice(0,k)};
-function topTerms(idx,n=3){const m=new Map();for(const i of idx)for(const[t,v]of E[i].vw)m.set(t,(m.get(t)||0)+v);return[...m].sort((a,b)=>b[1]-a[1]).slice(0,n).map(x=>x[0])}
-
-/* ============ topic tree: recursive spherical k-means ============ */
+function topTerms(idx,n=3){const m=new Map();for(const i of idx)for(const [t,v]of E[i].vw)m.set(t,(m.get(t)||0)+v);return[...m].sort((a,b)=>b[1]-a[1]).slice(0,n).map(x=>x[0])}
+/* ============ topic tree: recursive spherical k-means (view only) ============ */
 function kmeans(idx,k,seed){
-  const r=rng(seed);const C=[E[idx[Math.floor(r()*idx.length)]].v];
-  while(C.length<k){let best=-1,bv=9;for(const i of idx){let m=-1;for(const c of C)m=Math.max(m,dot(E[i].v,c));if(m<bv){bv=m;best=i}}C.push(E[best].v)}
-  const asg=new Int32Array(idx.length);
-  for(let it=0;it<12;it++){
-    let moved=0;idx.forEach((i,j)=>{let b=0,bv=-2;C.forEach((c,ci)=>{const s=dot(E[i].v,c);if(s>bv){bv=s;b=ci}});if(asg[j]!==b){moved++;asg[j]=b}});
-    for(let ci=0;ci<k;ci++){const m=new Map();idx.forEach((i,j)=>{if(asg[j]===ci)for(const[t,v]of E[i].v)m.set(t,(m.get(t)||0)+v)});if(m.size)C[ci]=norm(m)}
-    if(!moved&&it)break;
-  }
-  const G=Array.from({length:k},()=>[]);idx.forEach((i,j)=>G[asg[j]].push(i));return G.filter(g=>g.length);
+const r=rng(seed);const C=[E[idx[Math.floor(r()*idx.length)]].v];
+while(C.length<k){let best=-1,bv=9;for(const i of idx){let m=-1;for(const c of C)m=Math.max(m,dot(E[i].v,c));if(m<bv){bv=m;best=i}}C.push(E[best].v)}
+const asg=new Int32Array(idx.length);
+for(let it=0;it<12;it++){
+let moved=0;idx.forEach((i,j)=>{let b=0,bv=-2;C.forEach((c,ci)=>{const s=dot(E[i].v,c);if(s>bv){bv=s;b=ci}});if(asg[j]!==b){moved++;asg[j]=b}});
+for(let ci=0;ci<k;ci++){const m=new Map();idx.forEach((i,j)=>{if(asg[j]===ci)for(const [t,v]of E[i].v)m.set(t,(m.get(t)||0)+v)});if(m.size)C[ci]=norm(m)}
+if(!moved&&it)break;
+}
+const G=Array.from({length:k},()=>[]);idx.forEach((i,j)=>G[asg[j]].push(i));return G.filter(g=>g.length);
 }
 function topicTree(idx,depth){
-  const node={label:topTerms(idx).join(' · ')||'(no terms)',items:idx};
-  if(idx.length<=8||depth>4)return node;
-  const G=kmeans(idx,Math.max(2,Math.min(6,Math.ceil(idx.length/10))),idx.length*7+depth);
-  if(G.length<2)return node;
-  node.children=G.sort((a,b)=>b.length-a.length).map(g=>topicTree(g,depth+1));node.items=null;return node;
+const node={label:topTerms(idx).join(' · ')||'(no terms)',items:idx};
+if(idx.length<=8||depth>4)return node;
+const G=kmeans(idx,Math.max(2,Math.min(6,Math.ceil(idx.length/10))),idx.length*7+depth);
+if(G.length<2)return node;
+node.children=G.sort((a,b)=>b.length-a.length).map(g=>topicTree(g,depth+1));node.items=null;return node;
 }
 function timeTree(){const y=new Map();for(const e of[...E].sort((a,b)=>b.d-a.d)){const Y=e.d.getFullYear(),Mo=e.d.toLocaleString(undefined,{month:'long'}),D=e.d.toLocaleDateString(undefined,{weekday:'short',day:'numeric'});
-  if(!y.has(Y))y.set(Y,new Map());const mm=y.get(Y);if(!mm.has(Mo))mm.set(Mo,new Map());const dd=mm.get(Mo);if(!dd.has(D))dd.set(D,[]);dd.get(D).push(e.i)}
-  return{label:'time',children:[...y].map(([Y,mm])=>({label:String(Y),children:[...mm].map(([Mo,dd])=>({label:Mo,children:[...dd].map(([D,it])=>({label:D,items:it}))}))}))}}
+if(!y.has(Y))y.set(Y,new Map());const mm=y.get(Y);if(!mm.has(Mo))mm.set(Mo,new Map());const dd=mm.get(Mo);if(!dd.has(D))dd.set(D,[]);dd.get(D).push(e.i)}
+return{label:'time',children:[...y].map(([Y,mm])=>({label:String(Y),children:[...mm].map(([Mo,dd])=>({label:Mo,children:[...dd].map(([D,it])=>({label:D,items:it}))}))}))}}
 const collect=n=>[...(n.items||[]),...(n.children||[]).flatMap(collect)];
-
 /* ============ embeddings: browser model + IndexedDB cache ============ */
 const idb=(()=>{let p;const open=()=>p??=new Promise((res,rej)=>{const r=indexedDB.open('ix-embeddings',1);r.onupgradeneeded=()=>r.result.createObjectStore('vec',{keyPath:'k'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
-  const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction('vec',mode);const out=fn(t.objectStore('vec'));t.oncomplete=()=>res(out?.result);t.onerror=()=>rej(t.error)})};
-  return{all:()=>tx('readonly',s=>s.getAll()),put:rows=>tx('readwrite',s=>{rows.forEach(r=>s.put(r))}),clear:()=>tx('readwrite',s=>s.clear())}})();
+const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction('vec',mode);const out=fn(t.objectStore('vec'));t.oncomplete=()=>res(out?.result);t.onerror=()=>rej(t.error)})};
+return{all:()=>tx('readonly',s=>s.getAll()),put:rows=>tx('readwrite',s=>{rows.forEach(r=>s.put(r))}),clear:()=>tx('readwrite',s=>s.clear())}})();
 async function getPipe(){
-  if(EMB.pipe)return EMB.pipe;
-  embStatus('loading model…',true);
-  const{pipeline,env}=await import(TJS);env.allowLocalModels=false;      // model files cached by the browser after first download
-  EMB.pipe=await pipeline('feature-extraction',MODEL,{dtype:'q8'});
-  return EMB.pipe;
+if(EMB.pipe)return EMB.pipe;
+embStatus('loading model…',true);
+const{pipeline,env}=await import(TJS);env.allowLocalModels=false;// model files cached by the browser after first download
+EMB.pipe=await pipeline('feature-extraction',MODEL,{dtype:'q8'});
+return EMB.pipe;
 }
 async function embedTexts(texts){const p=await getPipe();const out=await p(texts,{pooling:'mean',normalize:true});return out.tolist()}
 function embStatus(t,busy){const el=$('#emb');el.textContent=t;el.classList.toggle('busy',!!busy)}
 async function syncEmbeddings(gen){
-  let rows=[];try{rows=await idb.all()}catch(e){console.warn('IndexedDB unavailable',e)}
-  const have=new Map(rows.filter(r=>r.m===MODEL).map(r=>[r.id,r]));
-  const todo=[];for(const e of E){const r=have.get(e.id);if(r&&r.h===e.h)e.ve=denseToMap(r.v);else todo.push(e)}   // new or edited notes only
-  let done=0;
-  try{
-    for(let b=0;b<todo.length;b+=16){
-      if(gen!==loadGen)return;
-      const batch=todo.slice(b,b+16);embStatus(`embedding new notes ${done}/${todo.length}…`,true);
-      const vecs=await embedTexts(batch.map(e=>e.text));
-      const save=batch.map((e,k)=>{e.ve=denseToMap(vecs[k]);return{k:MODEL+'|'+e.id,m:MODEL,id:e.id,h:e.h,v:Float32Array.from(vecs[k])}});
-      try{await idb.put(save)}catch{}done+=batch.length;
-    }
-  }catch(err){embStatus('embeddings unavailable (offline?) — TF-IDF still works');console.warn(err);return}
-  if(gen!==loadGen)return;
-  EMB.ready=true;EMB.count=todo.length;
-  embStatus(`embeddings ✓ ${E.length} (${todo.length} new${todo.length?'':' — all from cache'})`);
-  if(state.space==='e'){setSpace()}runSearch();
+let rows=[];try{rows=await idb.all()}catch(e){console.warn('IndexedDB unavailable',e)}
+const have=new Map(rows.filter(r=>r.m===MODEL).map(r=>[r.id,r]));
+const todo=[];for(const e of E){const r=have.get(e.id);if(r&&r.h===e.h)e.ve=denseToMap(r.v);else todo.push(e)}// new or edited notes only
+let done=0;
+try{
+for(let b=0;b<todo.length;b+=16){
+if(gen!==loadGen)return;
+const batch=todo.slice(b,b+16);embStatus(`embedding new notes ${done}/${todo.length}…`,true);
+const vecs=await embedTexts(batch.map(e=>e.text));
+const save=batch.map((e,k)=>{e.ve=denseToMap(vecs[k]);return{k:MODEL+'|'+e.id,m:MODEL,id:e.id,h:e.h,v:Float32Array.from(vecs[k])}});
+try{await idb.put(save)}catch{}done+=batch.length;
+}
+}catch(err){embStatus('embeddings unavailable (offline?) — TF-IDF still works');console.warn(err);return}
+if(gen!==loadGen)return;
+EMB.ready=true;EMB.count=todo.length;
+embStatus(`embeddings ✓ ${E.length} (${todo.length} new${todo.length?'':' — all from cache'})`);
+if(state.space==='e'){setSpace()}runSearch();
+}
+/* ============ LLM reranker (in-browser, Transformers.js) ============ */
+async function getLLM(){
+if(LLMST.gen)return LLMST.gen;
+LLMST.loading=true;embStatus('loading reranker model…',true);
+const{pipeline,env}=await import(TJS);env.allowLocalModels=false;
+const gen=await pipeline('text-generation',LLM,{dtype:'q4'});
+LLMST.gen=gen;LLMST.ready=true;LLMST.loading=false;
+embStatus('reranker ✓');
+return gen;
+}
+function buildPrompt(q,hits){
+const lines=hits.map((h,i)=>`${i+1}. ${E[h.i].text.replace(/\s+/g,' ').slice(0,220)}`).join('\n');
+return `<|im_start|>system
+You rank notes by how well they answer a search query. Reply with ONLY the numbers in best-first order, comma separated, no text.
+<|im_end|>
+<|im_start|>user
+Query: ${q}
+
+Notes:
+${lines}
+<|im_end|>
+<|im_start|>assistant
+`;
+}
+function parseOrder(txt,n){
+const seen=new Set(),out=[];
+for(const m of txt.matchAll(/\d+/g)){const k=+m[0]-1;if(k>=0&&k<n&&!seen.has(k)){seen.add(k);out.push(k)}}
+for(let k=0;k<n;k++)if(!seen.has(k))out.push(k);// append anything the model dropped
+return out;
+}
+async function llmRerank(q,hits){
+const gen=await getLLM();
+const out=await gen(buildPrompt(q,hits),{max_new_tokens:64,do_sample:false});
+const txt=out[0].generated_text.split('<|im_start|>assistant').pop()||'';
+const order=parseOrder(txt,hits.length);
+return order.map((k,rank)=>({...hits[k],rank}));
 }
 
 /* ============ search methods ============ */
 async function semanticScores(q){const[v]=await embedTexts([q]);const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
 const tokRe=q=>{const t=toks(q);return t.length?new RegExp('('+t.map(reEsc).join('|')+')','giu'):null};
-const METHODS={
-  tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
-    run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
-  semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
-    run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
-  hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
-    run:async q=>{const v=qvecTfidf(q);const sem=await semanticScores(q);return sem.map(r=>({i:r.i,s:.5*r.s+.5*dot(v,tfVec(E[r.i]))})).filter(r=>r.s>.15)},hl:tokRe},
-  similar:{name:'Similar to note (@id)',help:'Nearest notes to one note, using the vectors setting. Click ≈ on any note.',
-    run:q=>{const id=q.replace(/^@/,'').trim();const e=E.find(x=>x.id===id);if(!e)return[];return[{i:e.i,s:1.0001},...neighbors(e.i,40).filter(x=>x[1]>.02).map(([j,s])=>({i:j,s}))]},hl:()=>null},
-};
 
+const METHODS={
+tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
+run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
+rerank:{name:'TF-IDF → LLM rerank',help:'TF-IDF picks the top 20, then a small in-browser LLM reorders them by how well they answer the query. Slower, smarter.',needsLLM:true,
+run:async q=>{const v=qvecTfidf(q);const hits=E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s).slice(0,RERANK_N);
+if(!hits.length)return hits;const ranked=await llmRerank(q,hits);
+return ranked.map((r,k)=>({i:r.i,s:1-(k/ranked.length)}))},hl:tokRe},
+semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
+run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
+hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
+run:async q=>{const v=qvecTfidf(q);const sem=await semanticScores(q);return sem.map(r=>({i:r.i,s:.5*r.s+.5*dot(v,tfVec(E[r.i]))})).filter(r=>r.s>.15)},hl:tokRe},
+similar:{name:'Similar to note (@id)',help:'Nearest notes to one note, using the vectors setting. Click ≈ on any note.',
+run:q=>{const id=q.replace(/^@/,'').trim();const e=E.find(x=>x.id===id);if(!e)return[];return[{i:e.i,s:1.0001},...neighbors(e.i,40).filter(x=>x[1]>.02).map(([j,s])=>({i:j,s}))]},hl:()=>null},
+};
 let R={active:false,list:[],hit:new Set(),score:new Map(),hl:null,max:1},searchGen=0;
 async function runSearch(){
-  const my=++searchGen;const m=METHODS[state.method];const q=state.q.trim();
-  if(m.needsEmb&&q&&!EMB.ready){$('#stat').textContent='waiting for embeddings…';return}
-  const t0=performance.now();let res,active=!!q;
-  try{res=q?await m.run(q):E.map(e=>({i:e.i,s:0}))}catch(err){console.warn(err);res=[]}
-  if(my!==searchGen)return;                                  // a newer keystroke won
-  const ms=performance.now()-t0;
-  const s=state.sort;res.sort(s==='new'?(a,b)=>E[b.i].d-E[a.i].d:s==='old'?(a,b)=>E[a.i].d-E[b.i].d:(a,b)=>b.s-a.s||E[b.i].d-E[a.i].d);
-  R={active,list:res,hit:new Set(res.map(r=>r.i)),score:new Map(res.map(r=>[r.i,r])),hl:active?m.hl(q):null,max:Math.max(1e-9,...res.map(r=>r.s))};
-  $('#stat').textContent=`${active?res.length+' / ':''}${E.length} notes · ${ms.toFixed(1)} ms`;
-  render();
+const my=++searchGen;const m=METHODS[state.method];const q=state.q.trim();
+if(m.needsEmb&&q&&!EMB.ready){$('#stat').textContent='waiting for embeddings…';return}
+const t0=performance.now();let res,active=!!q;
+try{res=q?await m.run(q):E.map(e=>({i:e.i,s:0}))}catch(err){console.warn(err);res=[]}
+if(my!==searchGen)return;// a newer keystroke won
+const ms=performance.now()-t0;
+const s=state.sort;res.sort(s==='new'?(a,b)=>E[b.i].d-E[a.i].d:s==='old'?(a,b)=>E[a.i].d-E[b.i].d:(a,b)=>b.s-a.s||E[b.i].d-E[a.i].d);
+R={active,list:res,hit:new Set(res.map(r=>r.i)),score:new Map(res.map(r=>[r.i,r])),hl:active?m.hl(q):null,max:Math.max(1e-9,...res.map(r=>r.s))};
+$('#stat').textContent=`${active?res.length+' / ':''}${E.length} notes · ${ms.toFixed(1)} ms`;
+render();
 }
 const isHit=i=>!R.active||R.hit.has(i);
 function hlText(e){const t=e.text,h=R.hl;if(!h)return esc(t);let o='',last=0,m;h.lastIndex=0;
-  while((m=h.exec(t))){if(!m[0]){h.lastIndex++;continue}o+=esc(t.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';last=m.index+m[0].length}return o+esc(t.slice(last))}
-
+while((m=h.exec(t))){if(!m[0]){h.lastIndex++;continue}o+=esc(t.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';last=m.index+m[0].length}return o+esc(t.slice(last))}
 /* ============ views ============ */
 let teardown=null;
 const VIEWS={list:{name:'List',fn:listView},topic:{name:'Topic tree',fn:m=>treeView(m,cache.topic)},time:{name:'Time tree',fn:m=>treeView(m,timeTree())},cards:{name:'Flashcards',fn:cards}};
 function render(){teardown?.();teardown=null;const m=$('#main');m.innerHTML='';(VIEWS[state.view]||VIEWS.list).fn(m)}
 function card(e){const r=R.score.get(e.i),w=R.active&&r?Math.max(4,100*r.s/R.max):0;
-  return`<div class="card" data-i="${e.i}"><div class="t">${hlText(e)}</div><div class="meta"><span>${fmtD(e.d)}</span><span>${esc(e.source||'')}</span><span>${esc(e.status||'')}</span>${e.project?`<span>${esc(e.project)}</span>`:''}${R.active&&r?`<span>score ${(+r.s).toFixed(3)}</span>`:''}<button class="sim" data-sim="${esc(e.id)}">≈ similar</button></div>${w?`<div class="bar" style="width:${w}%"></div>`:''}</div>`}
+return`<div class="card" data-i="${e.i}"><div class="t">${hlText(e)}</div><div class="meta"><span>${fmtD(e.d)}</span><span>${esc(e.source||'')}</span><span>${esc(e.status||'')}</span>${e.project?`<span>${esc(e.project)}</span>`:''}${R.active&&r?`<span>score ${(+r.s).toFixed(3)}</span>`:''}<button class="sim" data-sim="${esc(e.id)}">≈ similar</button></div>${w?`<div class="bar" style="width:${w}%"></div>`:''}</div>`}
 function listView(m){const list=R.list;let n=0;const box=document.createElement('div');box.className='pad';m.append(box);
-  const more=()=>{box.insertAdjacentHTML('beforeend',list.slice(n,n+150).map(r=>card(E[r.i])).join(''));n+=150;if(n<list.length)box.insertAdjacentHTML('beforeend',`<button data-more>show more (${list.length-n})</button>`)};
-  box.addEventListener('click',ev=>{if(ev.target.matches('[data-more]')){ev.target.remove();more()}});
-  if(list.length)more();else box.innerHTML='<p class="hint">no matches</p>'}
+const more=()=>{box.insertAdjacentHTML('beforeend',list.slice(n,n+150).map(r=>card(E[r.i])).join(''));n+=150;if(n<list.length)box.insertAdjacentHTML('beforeend',`<button data-more>show more (${list.length-n})</button>`)};
+box.addEventListener('click',ev=>{if(ev.target.matches('[data-more]')){ev.target.remove();more()}});
+if(list.length)more();else box.innerHTML='<p class="hint">no matches</p>'}
 function treeView(m,root){
-  const div=document.createElement('div');div.className='pad tree';m.append(div);
-  const leaf=i=>`<li><span class="leaf ${isHit(i)?'':'miss'}" data-i="${i}">${hlText(E[i])}</span></li>`;
-  function li(n,depth){const all=collect(n),h=all.filter(isHit).length;if(state.hide&&R.active&&!h)return'';
-    const open=depth<1||(R.active&&h&&h<=60);
-    const kids=n.children?n.children.map(c=>li(c,depth+1)).join(''):(n.items||[]).filter(i=>!state.hide||isHit(i)).map(leaf).join('');
-    return`<li><span class="node ${R.active&&h?'hit':''}" data-t>${open?'▾':'▸'} <b>${esc(n.label)}</b><span class="c">${R.active?h+'/':''}${all.length}</span></span><ul ${open?'':'hidden'}>${kids}</ul></li>`}
-  div.innerHTML='<ul>'+li(root,0)+'</ul>';
-  div.addEventListener('click',ev=>{const n=ev.target.closest('[data-t]');if(!n)return;ev.stopPropagation();const ul=n.nextElementSibling;ul.hidden=!ul.hidden;n.firstChild.textContent=ul.hidden?'▸ ':'▾ '})}
+const div=document.createElement('div');div.className='pad tree';m.append(div);
+const leaf=i=>`<li><span class="leaf ${isHit(i)?'':'miss'}" data-i="${i}">${hlText(E[i])}</span></li>`;
+function li(n,depth){const all=collect(n),h=all.filter(isHit).length;if(state.hide&&R.active&&!h)return'';
+const open=depth<1||(R.active&&h&&h<=60);
+const kids=n.children?n.children.map(c=>li(c,depth+1)).join(''):(n.items||[]).filter(i=>!state.hide||isHit(i)).map(leaf).join('');
+return`<li><span class="node ${R.active&&h?'hit':''}" data-t>${open?'▾':'▸'} <b>${esc(n.label)}</b><span class="c">${R.active?h+'/':''}${all.length}</span></span><ul ${open?'':'hidden'}>${kids}</ul></li>`}
+div.innerHTML='<ul>'+li(root,0)+'</ul>';
+div.addEventListener('click',ev=>{const n=ev.target.closest('[data-t]');if(!n)return;ev.stopPropagation();const ul=n.nextElementSibling;ul.hidden=!ul.hidden;n.firstChild.textContent=ul.hidden?'▸ ':'▾ '})}
 function cards(m){const r=rng(Date.now());const order=R.list.map(x=>x.i).filter(isHit).sort(()=>r()-.5);let k=0;
-  const show=()=>{if(!order.length){m.innerHTML='<p class="pad hint">nothing to show</p>';return}const e=E[order[k]];
-    m.innerHTML=`<div class="flash pad"><p class="hint">${k+1} / ${order.length} · random order · ← → keys or swipe</p><div class="card"><div class="t">${hlText(e)}</div><div class="meta" style="justify-content:center">${fmtD(e.d)}</div></div><div class="row" style="justify-content:center"><button data-go="-1">← prev</button><button data-sim="${esc(e.id)}">≈ similar</button><button data-go="1">next →</button></div></div>`};
-  const go=d=>{k=(k+d+order.length)%order.length;show()};
-  m.onclick=ev=>{const b=ev.target.closest('[data-go]');if(b)go(+b.dataset.go)};
-  const key=ev=>{if(ev.target.tagName==='INPUT')return;if(ev.key==='ArrowRight')go(1);if(ev.key==='ArrowLeft')go(-1)};
-  let sx=null;const ts=ev=>{sx=ev.touches[0].clientX},te=ev=>{if(sx==null)return;const dx=ev.changedTouches[0].clientX-sx;if(Math.abs(dx)>50)go(dx<0?1:-1);sx=null};
-  addEventListener('keydown',key);m.addEventListener('touchstart',ts,{passive:true});m.addEventListener('touchend',te);
-  teardown=()=>{removeEventListener('keydown',key);m.onclick=null;m.removeEventListener('touchstart',ts);m.removeEventListener('touchend',te)};show()}
-
+const show=()=>{if(!order.length){m.innerHTML='<p class="pad hint">nothing to show</p>';return}const e=E[order[k]];
+m.innerHTML=`<div class="flash pad"><p class="hint">${k+1} / ${order.length} · random order · ← → keys or swipe</p><div class="card"><div class="t">${hlText(e)}</div><div class="meta" style="justify-content:center">${fmtD(e.d)}</div></div><div class="row" style="justify-content:center"><button data-go="-1">← prev</button><button data-sim="${esc(e.id)}">≈ similar</button><button data-go="1">next →</button></div></div>`};
+const go=d=>{k=(k+d+order.length)%order.length;show()};
+m.onclick=ev=>{const b=ev.target.closest('[data-go]');if(b)go(+b.dataset.go)};
+const key=ev=>{if(ev.target.tagName==='INPUT')return;if(ev.key==='ArrowRight')go(1);if(ev.key==='ArrowLeft')go(-1)};
+let sx=null;const ts=ev=>{sx=ev.touches[0].clientX},te=ev=>{if(sx==null)return;const dx=ev.changedTouches[0].clientX-sx;if(Math.abs(dx)>50)go(dx<0?1:-1);sx=null};
+addEventListener('keydown',key);m.addEventListener('touchstart',ts,{passive:true});m.addEventListener('touchend',te);
+teardown=()=>{removeEventListener('keydown',key);m.onclick=null;m.removeEventListener('touchstart',ts);m.removeEventListener('touchend',te)};show()}
 /* ============ detail drawer ============ */
 function openDrawer(i){const e=E[i];const skip=new Set(['i','t','g','d','h','v','vw','vg','vh','ve','text']);
-  const f=Object.entries(e).filter(([k,v])=>!skip.has(k)&&v!=null&&v!=='');
-  $('#drawer').innerHTML=`<div class="row"><button data-close>✕ close</button><button data-sim="${esc(e.id)}">≈ find similar</button></div><pre>${hlText(e)}</pre><table>${f.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table><h4>nearest notes <span class="hint">(${$('#space').selectedOptions[0].textContent.replace('vectors: ','')})</span></h4>${neighbors(i,8).map(([j,s])=>`<div class="leaf" data-i="${j}"><span class="hint">${s.toFixed(2)}</span> ${esc(E[j].text)}</div>`).join('')}`;
-  $('#drawer').classList.add('open')}
+const f=Object.entries(e).filter(([k,v])=>!skip.has(k)&&v!=null&&v!=='');
+$('#drawer').innerHTML=`<div class="row"><button data-close>✕ close</button><button data-sim="${esc(e.id)}">≈ find similar</button></div><pre>${hlText(e)}</pre><table>${f.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table><h4>nearest notes <span class="hint">(${$('#space').selectedOptions[0].textContent.replace('vectors: ','')})</span></h4>${neighbors(i,8).map(([j,s])=>`<div class="leaf" data-i="${j}"><span class="hint">${s.toFixed(2)}</span> ${esc(E[j].text)}</div>`).join('')}`;
+$('#drawer').classList.add('open')}
 document.addEventListener('click',ev=>{
-  if(ev.target.closest('[data-close]')){$('#drawer').classList.remove('open');return}
-  const s=ev.target.closest('[data-sim]');if(s){ev.stopPropagation();setMethod('similar');$('#q').value=state.q='@'+s.dataset.sim;$('#drawer').classList.remove('open');if(state.view==='cards')setView('list');else runSearch();return}
-  const c=ev.target.closest('[data-i]');if(c)openDrawer(+c.dataset.i)});
+if(ev.target.closest('[data-close]')){$('#drawer').classList.remove('open');return}
+const s=ev.target.closest('[data-sim]');if(s){ev.stopPropagation();setMethod('similar');$('#q').value=state.q='@'+s.dataset.sim;$('#drawer').classList.remove('open');if(state.view==='cards')setView('list');else runSearch();return}
+const c=ev.target.closest('[data-i]');if(c)openDrawer(+c.dataset.i)});
 addEventListener('keydown',e=>{if(e.key==='Escape')$('#drawer').classList.remove('open');if(e.key==='/'&&document.activeElement!==$('#q')){e.preventDefault();$('#q').focus()}});
-
 /* ============ data loading ============ */
 function parseJsonl(txt){const merged=new Map();for(const line of txt.split('\n')){const l=line.trim();if(!l)continue;let d;try{d=JSON.parse(l)}catch{continue}if(!d.id)continue;
-  let key=d.id;const prev=merged.get(key);
-  if(prev&&d.text&&prev.text&&d.text!==prev.text){                          // id collision (old phone Shortcut always wrote 2147483647): separate note
-    key=d.id+'~'+(d.ts||'');for(let n=2;merged.has(key);n++)key=d.id+'~'+(d.ts||'')+'~'+n;d.id=key}
-  const cur=merged.get(key)||{};for(const[k,v]of Object.entries(d))if(v!=null)cur[k]=v;merged.set(key,cur)}               // same id + same/no text = update: later lines win per field
-  return[...merged.values()].filter(d=>d.text)}
+let key=d.id;const prev=merged.get(key);
+if(prev&&d.text&&prev.text&&d.text!==prev.text){// id collision (old phone Shortcut always wrote 2147483647): separate note
+key=d.id+'~'+(d.ts||'');for(let n=2;merged.has(key);n++)key=d.id+'~'+(d.ts||'')+'~'+n;d.id=key}
+const cur=merged.get(key)||{};for(const [k,v]of Object.entries(d))if(v!=null)cur[k]=v;merged.set(key,cur)}// same id + same/no text = update: later lines win per field
+return[...merged.values()].filter(d=>d.text)}
 async function fetchEntries(){for(const u of DATA_URLS){try{const r=await fetch(u+(u.includes('?')?'&':'?')+'t='+Date.now(),{cache:'no-store'});if(!r.ok)continue;
-  return u.endsWith('.jsonl')?parseJsonl(await r.text()):await r.json()}catch{}}throw new Error('could not load entries')}
+return u.endsWith('.jsonl')?parseJsonl(await r.text()):await r.json()}catch{}}throw new Error('could not load entries')}
 let loadGen=0;
 async function load(){
-  const gen=++loadGen;$('#stat').textContent='loading…';
-  try{build(await fetchEntries())}catch(e){$('#main').innerHTML=`<p class="pad hint">${esc(e.message)}</p>`;return}
-  setSpace();runSearch();
-  syncEmbeddings(gen);                                         // background: embeds only new/edited notes
+const gen=++loadGen;$('#stat').textContent='loading…';
+try{build(await fetchEntries())}catch(e){$('#main').innerHTML=`<p class="pad hint">${esc(e.message)}</p>`;return}
+setSpace();runSearch();
+syncEmbeddings(gen);// background: embeds only new/edited notes
 }
-
 /* ============ wiring ============ */
 function setMethod(k){state.method=k;store.set('method',k);$('#method').value=k;$('#help').textContent=METHODS[k].help}
 function setView(k){state.view=k;store.set('view',k);document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===k));runSearch()}
@@ -271,12 +305,12 @@ $('#method').onchange=e=>{setMethod(e.target.value);runSearch()};
 $('#space').value=state.space;$('#space').onchange=e=>{state.space=e.target.value;store.set('space',state.space);setSpace();runSearch()};
 $('#sort').value=state.sort;$('#sort').onchange=e=>{state.sort=e.target.value;store.set('sort',state.sort);runSearch()};
 $('#hide').checked=state.hide;$('#hide').onchange=e=>{state.hide=e.target.checked;store.set('hide',state.hide?'1':'0');render()};
-let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsEmb?300:80)};
+let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsLLM?500:METHODS[state.method].needsEmb?300:80)};
 $('#q').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(deb);runSearch()}};
 $('#reload').onclick=async()=>{try{await fetch('/api/pull',{method:'POST'})}catch{}load()};
 setMethod(state.method in METHODS?state.method:'tfidf');
 state.view=state.view in VIEWS?state.view:'list';document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===state.view));
-window.__ix={get E(){return E},get R(){return R},get EMB(){return EMB},state,setView,setMethod,runSearch,idb};
+window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},getLLM(){return LLMST},state,setView,setMethod,runSearch,idb};
 load();
 </script>
 </body>
