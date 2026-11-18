@@ -68,10 +68,10 @@ th{color:var(--mut);font-weight:500}
 "use strict";
 /* ============ config ============ */
 const MODEL='Xenova/all-MiniLM-L6-v2';// 384-dim sentence embeddings
-const LLM='onnx-community/Qwen2.5-0.5B-Instruct';// small chat model for reranking, runs in this browser
+const CE='Xenova/ms-marco-MiniLM-L-6-v2';// cross-encoder: scores (query, note) pairs
 const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';// runs the models in this browser
 const DATA_URLS=['entries.jsonl','/api/entries'];// Pages: next to this file. Local: server.py
-const RERANK_N=20;// how many TF-IDF hits get sent to the LLM
+const RERANK_N=20;// how many TF-IDF hits get scored by the cross-encoder
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -92,7 +92,7 @@ const denseToMap=a=>new Map(Array.from(a,(x,k)=>[k,x]));
 let E=[],M={},cache={};
 const state={q:'',method:store.get('method','tfidf'),space:store.get('space','e'),sort:store.get('sort','rel'),view:store.get('view','list'),hide:store.get('hide','1')==='1'};
 const EMB={ready:false,pipe:null,count:0};
-const LLMST={ready:false,gen:null,loading:false};
+const CE_ST={ready:false,pipe:null,loading:false};
 function build(raw){
 E=raw.map((e,i)=>({...e,i,t:toks(e.text),g:grams(e.text),d:new Date(e.ts),h:fnv(e.text)}));
 const N=E.length,dfW=new Map(),dfG=new Map();
@@ -169,42 +169,20 @@ EMB.ready=true;EMB.count=todo.length;
 embStatus(`embeddings ✓ ${E.length} (${todo.length} new${todo.length?'':' — all from cache'})`);
 if(state.space==='e'){setSpace()}runSearch();
 }
-/* ============ LLM reranker (in-browser, Transformers.js) ============ */
-async function getLLM(){
-if(LLMST.gen)return LLMST.gen;
-LLMST.loading=true;embStatus('loading reranker model…',true);
+/* ============ cross-encoder reranker (in-browser, Transformers.js) ============ */
+async function getCE(){
+if(CE_ST.pipe)return CE_ST.pipe;
+CE_ST.loading=true;embStatus('loading reranker model…',true);
 const{pipeline,env}=await import(TJS);env.allowLocalModels=false;
-const gen=await pipeline('text-generation',LLM,{dtype:'q4'});
-LLMST.gen=gen;LLMST.ready=true;LLMST.loading=false;
+CE_ST.pipe=await pipeline('text-classification',CE,{dtype:'q8'});
+CE_ST.ready=true;CE_ST.loading=false;
 embStatus('reranker ✓');
-return gen;
+return CE_ST.pipe;
 }
-function buildPrompt(q,hits){
-const lines=hits.map((h,i)=>`${i+1}. ${E[h.i].text.replace(/\s+/g,' ').slice(0,220)}`).join('\n');
-return `<|im_start|>system
-You rank notes by how well they answer a search query. Reply with ONLY the numbers in best-first order, comma separated, no text.
-<|im_end|>
-<|im_start|>user
-Query: ${q}
-
-Notes:
-${lines}
-<|im_end|>
-<|im_start|>assistant
-`;
-}
-function parseOrder(txt,n){
-const seen=new Set(),out=[];
-for(const m of txt.matchAll(/\d+/g)){const k=+m[0]-1;if(k>=0&&k<n&&!seen.has(k)){seen.add(k);out.push(k)}}
-for(let k=0;k<n;k++)if(!seen.has(k))out.push(k);// append anything the model dropped
-return out;
-}
-async function llmRerank(q,hits){
-const gen=await getLLM();
-const out=await gen(buildPrompt(q,hits),{max_new_tokens:64,do_sample:false});
-const txt=out[0].generated_text.split('<|im_start|>assistant').pop()||'';
-const order=parseOrder(txt,hits.length);
-return order.map((k,rank)=>({...hits[k],rank}));
+async function ceRerank(q,hits){
+const ce=await getCE();
+const out=await ce(hits.map(h=>q),{text_pair:hits.map(h=>E[h.i].text)});// one batch, one pass per pair
+return hits.map((h,k)=>({i:h.i,s:out[k].score})).sort((a,b)=>b.s-a.s);
 }
 
 /* ============ search methods ============ */
@@ -214,10 +192,9 @@ const tokRe=q=>{const t=toks(q);return t.length?new RegExp('('+t.map(reEsc).join
 const METHODS={
 tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
 run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
-rerank:{name:'TF-IDF → LLM rerank',help:'TF-IDF picks the top 20, then a small in-browser LLM reorders them by how well they answer the query. Slower, smarter.',needsLLM:true,
+rerank:{name:'TF-IDF → cross-encoder',help:'TF-IDF picks the top 20, then a small in-browser cross-encoder rescores each pair by how well it answers the query. Slower, sharper.',needsCE:true,
 run:async q=>{const v=qvecTfidf(q);const hits=E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s).slice(0,RERANK_N);
-if(!hits.length)return hits;const ranked=await llmRerank(q,hits);
-return ranked.map((r,k)=>({i:r.i,s:1-(k/ranked.length)}))},hl:tokRe},
+if(!hits.length)return hits;return await ceRerank(q,hits)},hl:tokRe},
 semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
 run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
 hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
@@ -305,12 +282,12 @@ $('#method').onchange=e=>{setMethod(e.target.value);runSearch()};
 $('#space').value=state.space;$('#space').onchange=e=>{state.space=e.target.value;store.set('space',state.space);setSpace();runSearch()};
 $('#sort').value=state.sort;$('#sort').onchange=e=>{state.sort=e.target.value;store.set('sort',state.sort);runSearch()};
 $('#hide').checked=state.hide;$('#hide').onchange=e=>{state.hide=e.target.checked;store.set('hide',state.hide?'1':'0');render()};
-let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsLLM?500:METHODS[state.method].needsEmb?300:80)};
+let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsCE?300:METHODS[state.method].needsEmb?300:80)};
 $('#q').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(deb);runSearch()}};
 $('#reload').onclick=async()=>{try{await fetch('/api/pull',{method:'POST'})}catch{}load()};
 setMethod(state.method in METHODS?state.method:'tfidf');
 state.view=state.view in VIEWS?state.view:'list';document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===state.view));
-window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},getLLM(){return LLMST},state,setView,setMethod,runSearch,idb};
+window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},getCE(){return CE_ST},state,setView,setMethod,runSearch,idb};
 load();
 </script>
 </body>
