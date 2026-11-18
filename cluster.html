@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Idea Clusters</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#e3e3e0;--acc:#3b5bdb}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--panel:#1d1d21;--fg:#ececf0;--mut:#9a9aa3;--line:#2e2e34;--acc:#7c95ff}}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=number],select,button{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:13px}
+input[type=number]{width:70px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}
+button.go{background:var(--acc);color:#fff;border-color:var(--acc)}
+button:disabled{opacity:.5;cursor:default}
+.hint{color:var(--mut);font-size:12px}
+#status{color:var(--mut);font-size:12px}#status.busy{color:var(--acc)}
+.stat{margin-left:auto;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+main{flex:1;overflow:auto;min-height:0;padding:12px 16px}
+.cl{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.cl>summary{cursor:pointer;padding:10px 12px;display:flex;gap:10px;align-items:baseline;list-style:none}
+.cl>summary::-webkit-details-marker{display:none}
+.cl>summary::before{content:"▸";color:var(--mut)}
+.cl[open]>summary::before{content:"▾"}
+.cl .lab{font-weight:600}
+.cl .n{margin-left:auto;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+.bar{height:3px;background:var(--acc);opacity:.6;border-radius:2px;margin:0 12px 8px}
+.it{padding:6px 12px;border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
+.it .s{color:var(--mut);font-size:11px;margin-right:6px;font-variant-numeric:tabular-nums}
+.it.rep{font-weight:500}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <label class="hint">clusters (k) <input id="k" type="number" min="2" max="50" value="8"></label>
+    <button id="run" class="go" disabled>Cluster</button>
+    <button id="auto" disabled title="try k = 2…15, pick best silhouette score">Auto k</button>
+    <select id="sort"><option value="size">sort: size</option><option value="tight">sort: tightness</option></select>
+    <label class="hint">notes file <input id="file" type="file"></label>
+    <span class="stat" id="stat"></span>
+  </div>
+  <div class="row"><span id="status"></span></div>
+</header>
+<main id="main"></main>
+<script type="module">
+"use strict";
+/* ============ config (same model + runtime + cache as explore.html) ============ */
+const MODEL='Xenova/all-MiniLM-L6-v2';
+const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';
+const DATA_URLS=['entries.jsonl','/api/entries'];
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fnv(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193)}return(h>>>0).toString(36)}
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const status=(t,busy)=>{const el=$('#status');el.textContent=t;el.classList.toggle('busy',!!busy)};
+
+/* ============ data ============ */
+function parseJsonl(txt){const merged=new Map();for(const line of txt.split('\n')){const l=line.trim();if(!l)continue;let d;try{d=JSON.parse(l)}catch{continue}if(!d.id)continue;
+  let key=d.id;const prev=merged.get(key);
+  if(prev&&d.text&&prev.text&&d.text!==prev.text){key=d.id+'~'+(d.ts||'');for(let n=2;merged.has(key);n++)key=d.id+'~'+(d.ts||'')+'~'+n;d.id=key}
+  const cur=merged.get(key)||{};for(const[k,v]of Object.entries(d))if(v!=null)cur[k]=v;merged.set(key,cur)}
+  return[...merged.values()].filter(d=>d.text)}
+async function fetchEntries(){for(const u of DATA_URLS){try{const r=await fetch(u+'?t='+Date.now(),{cache:'no-store'});if(!r.ok)continue;
+  return u.endsWith('.jsonl')?parseJsonl(await r.text()):await r.json()}catch{}}throw new Error('could not load entries.jsonl')}
+
+/* ============ embeddings (model in browser, IndexedDB cache shared with explore.html) ============ */
+const idb=(()=>{let p;const open=()=>p??=new Promise((res,rej)=>{const r=indexedDB.open('ix-embeddings',1);r.onupgradeneeded=()=>r.result.createObjectStore('vec',{keyPath:'k'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+  const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction('vec',mode);const out=fn(t.objectStore('vec'));t.oncomplete=()=>res(out?.result);t.onerror=()=>rej(t.error)})};
+  return{all:()=>tx('readonly',s=>s.getAll()),put:rows=>tx('readwrite',s=>{rows.forEach(r=>s.put(r))})}})();
+let pipe=null;
+async function getPipe(){if(pipe)return pipe;status('loading model…',true);
+  const{pipeline,env}=await import(TJS);env.allowLocalModels=false;
+  pipe=await pipeline('feature-extraction',MODEL,{dtype:'q8'});return pipe}
+async function embedTexts(texts){const p=await getPipe();return(await p(texts,{pooling:'mean',normalize:true})).tolist()}
+
+/* ============ clustering: spherical k-means (cosine) on dense vectors ============ */
+const STOP=new Set(("a an the and or but if of to in on at for with from by is are was were be been being it its this that these those i im me my we our you your he she they them their as so not no do does did dont have has had will would can could should just about into than then there here what which who when where why how all any some more most other such only own same too very also get got make like want need use using thing things one way new idea maybe really").split(" "));
+const toks=s=>(s.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]).filter(w=>w.length>1&&!STOP.has(w));
+const dot=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s};
+function unit(v){let n=0;for(let i=0;i<v.length;i++)n+=v[i]*v[i];n=Math.sqrt(n)||1;for(let i=0;i<v.length;i++)v[i]/=n;return v}
+
+function kmeansOnce(V,k,seed){
+  const N=V.length,D=V[0].length,r=rng(seed);
+  // k-means++ init (distance = 1 - cosine)
+  const C=[Float32Array.from(V[Math.floor(r()*N)])];
+  const d=new Float32Array(N).fill(2);
+  while(C.length<k){
+    let tot=0;const last=C[C.length-1];
+    for(let i=0;i<N;i++){d[i]=Math.min(d[i],1-dot(V[i],last));tot+=d[i]*d[i]}
+    let x=r()*tot,pick=N-1;for(let i=0;i<N;i++){x-=d[i]*d[i];if(x<=0){pick=i;break}}
+    C.push(Float32Array.from(V[pick]));
+  }
+  const asg=new Int32Array(N).fill(-1);
+  for(let it=0;it<50;it++){
+    let moved=0;
+    for(let i=0;i<N;i++){let b=0,bv=-2;for(let c=0;c<k;c++){const s=dot(V[i],C[c]);if(s>bv){bv=s;b=c}}if(asg[i]!==b){asg[i]=b;moved++}}
+    if(!moved)break;
+    const sums=Array.from({length:k},()=>new Float32Array(D)),cnt=new Int32Array(k);
+    for(let i=0;i<N;i++){cnt[asg[i]]++;const s=sums[asg[i]],v=V[i];for(let j=0;j<D;j++)s[j]+=v[j]}
+    for(let c=0;c<k;c++){
+      if(cnt[c]){C[c]=unit(sums[c])}
+      else{let w=0,wv=2;for(let i=0;i<N;i++){const s=dot(V[i],C[asg[i]]);if(s<wv){wv=s;w=i}}C[c]=Float32Array.from(V[w])}   // reseed empty cluster at worst-fit point
+    }
+  }
+  let score=0;for(let i=0;i<N;i++)score+=dot(V[i],C[asg[i]]);
+  return{asg,C,score};
+}
+function kmeans(V,k,restarts=6){let best=null;for(let s=0;s<restarts;s++){const r=kmeansOnce(V,k,1234+s*97);if(!best||r.score>best.score)best=r}return best}
+
+function silhouette(S,asg,k){
+  const N=asg.length,size=new Int32Array(k);for(const a of asg)size[a]++;
+  let tot=0,cnt=0;
+  for(let i=0;i<N;i++){
+    if(size[asg[i]]<2)continue;
+    const sum=new Float64Array(k);for(let j=0;j<N;j++)if(j!==i)sum[asg[j]]+=1-S[i*N+j];
+    const a=sum[asg[i]]/(size[asg[i]]-1);let b=Infinity;
+    for(let c=0;c<k;c++)if(c!==asg[i]&&size[c])b=Math.min(b,sum[c]/size[c]);
+    tot+=(b-a)/Math.max(a,b);cnt++;
+  }
+  return cnt?tot/cnt:0;
+}
+
+/* cluster labels: class-based TF-IDF (BERTopic-style) over the cluster's words */
+function labels(E,asg,k){
+  const tf=Array.from({length:k},()=>new Map()),all=new Map(),len=new Float64Array(k);
+  E.forEach((e,i)=>{for(const t of toks(e.text)){const m=tf[asg[i]];m.set(t,(m.get(t)||0)+1);all.set(t,(all.get(t)||0)+1);len[asg[i]]++}});
+  const avg=len.reduce((a,b)=>a+b,0)/k||1;
+  return tf.map(m=>[...m].map(([t,c])=>[t,c*Math.log(1+avg/all.get(t))]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]).join(' · ')||'(no terms)');
+}
+
+/* ============ app ============ */
+let E=[],V=[],S=null,result=null;
+
+async function init(raw){
+  status('loading entries…',true);
+  E=raw.map(e=>({...e,h:fnv(e.text)}));
+  let rows=[];try{rows=await idb.all()}catch{}
+  const have=new Map(rows.filter(r=>r.m===MODEL).map(r=>[r.id,r]));
+  const todo=[];for(const e of E){const r=have.get(e.id);if(r&&r.h===e.h)e.v=r.v;else todo.push(e)}
+  let done=0;
+  for(let b=0;b<todo.length;b+=16){
+    const batch=todo.slice(b,b+16);status(`embedding ${done}/${todo.length}…`,true);
+    const vecs=await embedTexts(batch.map(e=>e.text));
+    const save=batch.map((e,i)=>{e.v=Float32Array.from(vecs[i]);return{k:MODEL+'|'+e.id,m:MODEL,id:e.id,h:e.h,v:e.v}});
+    try{await idb.put(save)}catch{}done+=batch.length;
+  }
+  V=E.map(e=>unit(Float32Array.from(e.v)));
+  const N=V.length;S=new Float32Array(N*N);
+  for(let i=0;i<N;i++){S[i*N+i]=1;for(let j=i+1;j<N;j++)S[i*N+j]=S[j*N+i]=dot(V[i],V[j])}
+  status(`${N} notes embedded (${todo.length} new, ${N-todo.length} from cache)`);
+  $('#run').disabled=$('#auto').disabled=false;
+  $('#k').max=Math.max(2,N-1);
+  run(+$('#k').value);
+}
+const tick=()=>new Promise(r=>setTimeout(r,0));
+
+async function run(k){
+  k=Math.max(2,Math.min(k,E.length-1));$('#k').value=k;
+  const t0=performance.now();await tick();
+  const{asg,C}=kmeans(V,k);
+  result={k,asg,C,sil:silhouette(S,asg,k),lab:labels(E,asg,k)};
+  $('#stat').textContent=`k=${k} · silhouette ${result.sil.toFixed(3)} · ${(performance.now()-t0).toFixed(0)} ms`;
+  render();
+}
+async function auto(){
+  const hi=Math.min(15,E.length-1);let best=null;
+  for(let k=2;k<=hi;k++){
+    status(`trying k=${k}/${hi}…`,true);await tick();
+    const{asg}=kmeans(V,k,3),s=silhouette(S,asg,k);
+    if(!best||s>best.s)best={k,s};
+  }
+  status(`best k=${best.k} (silhouette ${best.s.toFixed(3)})`);
+  await run(best.k);
+}
+function render(){
+  const{k,asg,C,lab}=result,groups=Array.from({length:k},()=>[]);
+  asg.forEach((c,i)=>groups[c].push(i));
+  const cl=groups.map((idx,c)=>{
+    idx.sort((a,b)=>dot(V[b],C[c])-dot(V[a],C[c]));                 // closest to centroid first
+    const tight=idx.reduce((s,i)=>s+dot(V[i],C[c]),0)/idx.length;
+    return{c,idx,tight,label:lab[c]};
+  }).filter(g=>g.idx.length);
+  const by=$('#sort').value;cl.sort(by==='tight'?(a,b)=>b.tight-a.tight:(a,b)=>b.idx.length-a.idx.length);
+  const max=Math.max(...cl.map(g=>g.idx.length));
+  $('#main').innerHTML=cl.map(g=>`<details class="cl"><summary><span class="lab">${esc(g.label)}</span><span class="n">${g.idx.length} notes · tightness ${g.tight.toFixed(2)}</span></summary><div class="bar" style="width:${Math.max(3,100*g.idx.length/max)}%"></div>${
+    g.idx.map((i,r)=>`<div class="it${r===0?' rep':''}"><span class="s">${dot(V[i],C[g.c]).toFixed(2)}</span>${esc(E[i].text)}</div>`).join('')}</details>`).join('');
+}
+$('#run').onclick=()=>run(+$('#k').value||8);
+$('#auto').onclick=auto;
+$('#sort').onchange=()=>result&&render();
+const start=raw=>init(raw).catch(e=>{status('error: '+e.message);console.error(e)});
+$('#file').onchange=async e=>{const f=e.target.files[0];if(!f)return;status('reading '+f.name+'…',true);try{const t=await f.text();start(t.trimStart().startsWith('[')?JSON.parse(t):parseJsonl(t))}catch(err){status('could not read file: '+err.message)}};
+fetchEntries().then(start).catch(()=>status('choose your entries.jsonl file above to begin'));
+</script>
+</body>
+</html>
