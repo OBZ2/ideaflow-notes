@@ -422,3 +422,5 @@
 {"id":"2147483647","ts":"2026-11-19","text":"hello sex is funny","status":"new","source":"button","type":"unknown"}
 {"id":"2147483647","ts":"2026-11-19","text":"TEXT: i love scripts
 MISSING: no context provided","status":"new","source":"button","type":"unknown"}
+{"id":"2147483647","ts":"2026-11-19","text":"TEXT: test shortcut to siri
+MISSING: action or instruction for siri to perform","status":"new","source":"button","type":"unknown"}
