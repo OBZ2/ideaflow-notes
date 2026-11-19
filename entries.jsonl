@@ -424,3 +424,5 @@
 MISSING: no context provided","status":"new","source":"button","type":"unknown"}
 {"id":"2147483647","ts":"2026-11-19","text":"TEXT: test shortcut to siri
 MISSING: action or instruction for siri to perform","status":"new","source":"button","type":"unknown"}
+{"id":"2147483647","ts":"2026-11-19","text":"TEXT: You clean up short personal notes before they are saved.
+MISSING: Purpose or context for cleaning notes.","status":"new","source":"button","type":"unknown"}
