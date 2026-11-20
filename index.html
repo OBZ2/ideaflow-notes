@@ -91,7 +91,7 @@ function mix(a,b){const m=new Map();for(const [t,v]of a)m.set('w:'+t,v);for(cons
 function dot(a,b){if(a.size>b.size)[a,b]=[b,a];let s=0;for(const [t,v]of a){const u=b.get(t);if(u)s+=v*u}return s}
 const denseToMap=a=>new Map(Array.from(a,(x,k)=>[k,x]));
 let E=[],M={},cache={};
-const state={q:'',method:store.get('method','tfidf'),space:store.get('space','e'),sort:store.get('sort','rel'),view:store.get('view','list'),hide:store.get('hide','1')==='1'};
+const state={q:'',method:store.get('method2','hybrid'),space:store.get('space','e'),sort:store.get('sort','rel'),view:store.get('view','list'),hide:store.get('hide','1')==='1'};
 const EMB={ready:false,pipe:null,count:0};
 const CE_ST={ready:false,pipe:null,loading:false};
 function build(raw){
@@ -182,38 +182,47 @@ return CE_ST.pipe;
 }
 async function ceRerank(q,hits){
 const ce=await getCE();
-const out=await ce(hits.map(h=>q),{text_pair:hits.map(h=>E[h.i].text)});// one batch, one pass per pair
-return hits.map((h,k)=>({i:h.i,s:out[k].score})).sort((a,b)=>b.s-a.s);
+// Read raw logits: this model has ONE output, and the text-classification pipeline softmaxes it → always 1.0,
+// which silently kept the input order. Sigmoid of the logit gives a usable 0–1 relevance.
+const inp=ce.tokenizer(hits.map(h=>q),{text_pair:hits.map(h=>E[h.i].text),padding:true,truncation:true});
+const{logits}=await ce.model(inp);// one batch, one pass per pair
+return hits.map((h,k)=>({i:h.i,s:1/(1+Math.exp(-logits.data[k]))})).sort((a,b)=>b.s-a.s);
 }
 
 /* ============ search methods ============ */
 async function semanticScores(q){const[v]=await embedTexts([q]);const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
+const tfidfHits=q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s)};
+const semHits=async q=>(await semanticScores(q)).filter(r=>r.s>.2).sort((a,b)=>b.s-a.s);
+// Reciprocal rank fusion: score = Σ 1/(60+rank) over the lists a note appears in. Uses positions, not raw
+// scores, so TF-IDF (mostly 0) and embedding cosine (0.1–0.6 for everything) can't swamp each other.
+const RRF_K=60;
+function rrf(...lists){const m=new Map();for(const l of lists)l.forEach((r,k)=>m.set(r.i,(m.get(r.i)||0)+1/(RRF_K+k+1)));return[...m].map(([i,s])=>({i,s}))}
 const tokRe=q=>{const t=toks(q);return t.length?new RegExp('('+t.map(reEsc).join('|')+')','giu'):null};
 
 const METHODS={
 tfidf:{name:'TF-IDF',help:'Ranks by shared rare words (or 3-letter chunks, per the vectors setting). Exact wording.',
 run:q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05)},hl:tokRe},
-rerank:{name:'TF-IDF → cross-encoder',help:'TF-IDF picks the top 20, then a small in-browser cross-encoder rescores each pair by how well it answers the query. Slower, sharper.',needsCE:true,
-run:async q=>{const v=qvecTfidf(q);const hits=E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s).slice(0,RERANK_N);
+rerank:{name:'Hybrid → cross-encoder',help:'Top 20 by TF-IDF plus top 20 by meaning (embeddings), then a small in-browser cross-encoder rescores each pair by how well it answers the query. Slowest, sharpest.',needsCE:true,
+run:async q=>{const seen=new Set(),hits=[];for(const r of[...tfidfHits(q).slice(0,RERANK_N),...(EMB.ready?(await semHits(q)).slice(0,RERANK_N):[])])if(!seen.has(r.i)){seen.add(r.i);hits.push(r)}
 if(!hits.length)return hits;return await ceRerank(q,hits)},hl:tokRe},
 semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
 run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
-hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Average of both scores: exact words and meaning together.',needsEmb:true,
-run:async q=>{const v=qvecTfidf(q);const sem=await semanticScores(q);return sem.map(r=>({i:r.i,s:.5*r.s+.5*dot(v,tfVec(E[r.i]))})).filter(r=>r.s>.15)},hl:tokRe},
+hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Exact words and meaning together: both rankings merged by position (reciprocal rank fusion). Falls back to TF-IDF until embeddings load.',needsEmb:true,
+run:async q=>rrf(tfidfHits(q),await semHits(q)),hl:tokRe},
 similar:{name:'Similar to note (@id)',help:'Nearest notes to one note, using the vectors setting. Click ≈ on any note.',
 run:q=>{const id=q.replace(/^@/,'').trim();const e=E.find(x=>x.id===id);if(!e)return[];return[{i:e.i,s:1.0001},...neighbors(e.i,40).filter(x=>x[1]>.02).map(([j,s])=>({i:j,s}))]},hl:()=>null},
 };
 let R={active:false,list:[],hit:new Set(),score:new Map(),hl:null,max:1},searchGen=0;
 async function runSearch(){
-const my=++searchGen;const m=METHODS[state.method];const q=state.q.trim();
-if(m.needsEmb&&q&&!EMB.ready){$('#stat').textContent='waiting for embeddings…';return}
+const my=++searchGen;const q=state.q.trim();let m=METHODS[state.method];
+const fallback=m.needsEmb&&q&&!EMB.ready;if(fallback)m=METHODS.tfidf;// TF-IDF until embeddings load
 const t0=performance.now();let res,active=!!q;
 try{res=q?await m.run(q):E.map(e=>({i:e.i,s:0}))}catch(err){console.warn(err);res=[]}
 if(my!==searchGen)return;// a newer keystroke won
 const ms=performance.now()-t0;
 const s=state.sort;res.sort(s==='new'?(a,b)=>E[b.i].d-E[a.i].d:s==='old'?(a,b)=>E[a.i].d-E[b.i].d:(a,b)=>b.s-a.s||E[b.i].d-E[a.i].d);
 R={active,list:res,hit:new Set(res.map(r=>r.i)),score:new Map(res.map(r=>[r.i,r])),hl:active?m.hl(q):null,max:Math.max(1e-9,...res.map(r=>r.s))};
-$('#stat').textContent=`${active?res.length+' / ':''}${E.length} notes · ${ms.toFixed(1)} ms`;
+$('#stat').textContent=`${active?res.length+' / ':''}${E.length} notes · ${ms.toFixed(1)} ms${fallback?' · TF-IDF until embeddings load':''}`;
 render();
 }
 const isHit=i=>!R.active||R.hit.has(i);
@@ -275,7 +284,7 @@ setSpace();runSearch();
 syncEmbeddings(gen);// background: embeds only new/edited notes
 }
 /* ============ wiring ============ */
-function setMethod(k){state.method=k;store.set('method',k);$('#method').value=k;$('#help').textContent=METHODS[k].help}
+function setMethod(k){state.method=k;store.set('method2',k);$('#method').value=k;$('#help').textContent=METHODS[k].help}
 function setView(k){state.view=k;store.set('view',k);document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===k));runSearch()}
 $('#method').innerHTML=Object.entries(METHODS).map(([k,m])=>`<option value="${k}">${m.name}</option>`).join('');
 $('#views').innerHTML=Object.entries(VIEWS).map(([k,v])=>`<button data-v="${k}">${v.name}</button>`).join('');
@@ -287,7 +296,7 @@ $('#hide').checked=state.hide;$('#hide').onchange=e=>{state.hide=e.target.checke
 let deb;$('#q').oninput=e=>{state.q=e.target.value;clearTimeout(deb);deb=setTimeout(runSearch,METHODS[state.method].needsCE?300:METHODS[state.method].needsEmb?300:80)};
 $('#q').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(deb);runSearch()}};
 $('#reload').onclick=async()=>{try{await fetch('/api/pull',{method:'POST'})}catch{}load()};
-setMethod(state.method in METHODS?state.method:'tfidf');
+setMethod(state.method in METHODS?state.method:'hybrid');
 state.view=state.view in VIEWS?state.view:'list';document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===state.view));
 window.__ix={getE(){return E},getR(){return R},getEMB(){return EMB},getCE(){return CE_ST},state,setView,setMethod,runSearch,idb};
 load();
