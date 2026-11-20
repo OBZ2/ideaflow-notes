@@ -68,9 +68,10 @@ th{color:var(--mut);font-weight:500}
 <script type="module">
 "use strict";
 /* ============ config ============ */
-const MODEL='Xenova/all-MiniLM-L6-v2';// 384-dim sentence embeddings
+const MODEL='onnx-community/embeddinggemma-300m-ONNX';// 768-dim, multilingual (incl. Arabic); ~300 MB q8, cached by the browser
+const Q_PREFIX='task: search result | query: ',D_PREFIX='title: none | text: ';// EmbeddingGemma is trained with these; skipping them hurts quality
 const CE='Xenova/ms-marco-MiniLM-L-6-v2';// cross-encoder: scores (query, note) pairs
-const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';// runs the models in this browser
+const TJS='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.5';// runs the models in this browser
 const DATA_URLS=['entries.jsonl','/api/entries'];// Pages: next to this file. Local: server.py
 const RERANK_N=20;// how many TF-IDF hits get scored by the cross-encoder
 /* ============ helpers ============ */
@@ -144,15 +145,19 @@ const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{c
 return{all:()=>tx('readonly',s=>s.getAll()),put:rows=>tx('readwrite',s=>{rows.forEach(r=>s.put(r))}),clear:()=>tx('readwrite',s=>s.clear())}})();
 async function getPipe(){
 if(EMB.pipe)return EMB.pipe;
-embStatus('loading model…',true);
-const{pipeline,env}=await import(TJS);env.allowLocalModels=false;// model files cached by the browser after first download
-EMB.pipe=await pipeline('feature-extraction',MODEL,{dtype:'q8'});
+embStatus('loading model (~300 MB, first time only)…',true);
+const{AutoModel,AutoTokenizer,env}=await import(TJS);env.allowLocalModels=false;// model files cached by the browser after first download
+const[tok,model]=await Promise.all([AutoTokenizer.from_pretrained(MODEL),AutoModel.from_pretrained(MODEL,{dtype:'q8'})]);// no fp16 for Gemma activations
+EMB.pipe={tok,model};
 return EMB.pipe;
 }
-async function embedTexts(texts){const p=await getPipe();const out=await p(texts,{pooling:'mean',normalize:true});return out.tolist()}
+// kind 'query' vs 'doc' picks the prefix. sentence_embedding = the model's own pooled + projected + normalised output.
+async function embedTexts(texts,kind='doc'){const{tok,model}=await getPipe();const pre=kind==='query'?Q_PREFIX:D_PREFIX;
+const inp=tok(texts.map(t=>pre+t),{padding:true,truncation:true,max_length:512});const{sentence_embedding}=await model(inp);return sentence_embedding.tolist()}
 function embStatus(t,busy){const el=$('#emb');el.textContent=t;el.classList.toggle('busy',!!busy)}
 async function syncEmbeddings(gen){
 let rows=[];try{rows=await idb.all()}catch(e){console.warn('IndexedDB unavailable',e)}
+if(rows.some(r=>r.m!==MODEL)){try{await idb.clear()}catch{}rows=[]}// model changed: drop old vectors once, re-embed all
 const have=new Map(rows.filter(r=>r.m===MODEL).map(r=>[r.id,r]));
 const todo=[];for(const e of E){const r=have.get(e.id);if(r&&r.h===e.h)e.ve=denseToMap(r.v);else todo.push(e)}// new or edited notes only
 let done=0;
@@ -190,9 +195,10 @@ return hits.map((h,k)=>({i:h.i,s:1/(1+Math.exp(-logits.data[k]))})).sort((a,b)=>
 }
 
 /* ============ search methods ============ */
-async function semanticScores(q){const[v]=await embedTexts([q]);const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
+async function semanticScores(q){const[v]=await embedTexts([q],'query');const qv=denseToMap(v);return E.map(e=>({i:e.i,s:dot(qv,e.ve)}))}
 const tfidfHits=q=>{const v=qvecTfidf(q);return E.map(e=>({i:e.i,s:dot(v,tfVec(e))})).filter(r=>r.s>.05).sort((a,b)=>b.s-a.s)};
-const semHits=async q=>(await semanticScores(q)).filter(r=>r.s>.2).sort((a,b)=>b.s-a.s);
+const SEM_MIN=.25;// EmbeddingGemma: unrelated notes score ~.2–.27 (median ~.23), real matches ~.35+
+const semHits=async q=>(await semanticScores(q)).filter(r=>r.s>SEM_MIN).sort((a,b)=>b.s-a.s);
 // Reciprocal rank fusion: score = Σ 1/(60+rank) over the lists a note appears in. Uses positions, not raw
 // scores, so TF-IDF (mostly 0) and embedding cosine (0.1–0.6 for everything) can't swamp each other.
 const RRF_K=60;
@@ -206,7 +212,7 @@ rerank:{name:'Hybrid → cross-encoder',help:'Top 20 by TF-IDF plus top 20 by me
 run:async q=>{const seen=new Set(),hits=[];for(const r of[...tfidfHits(q).slice(0,RERANK_N),...(EMB.ready?(await semHits(q)).slice(0,RERANK_N):[])])if(!seen.has(r.i)){seen.add(r.i);hits.push(r)}
 if(!hits.length)return hits;return await ceRerank(q,hits)},hl:tokRe},
 semantic:{name:'Semantic (embeddings)',help:'Ranks by meaning using a small model running in this browser. Finds notes with different words, same idea.',needsEmb:true,
-run:async q=>(await semanticScores(q)).filter(r=>r.s>.2),hl:()=>null},
+run:async q=>(await semanticScores(q)).filter(r=>r.s>SEM_MIN),hl:()=>null},
 hybrid:{name:'Hybrid (TF-IDF + semantic)',help:'Exact words and meaning together: both rankings merged by position (reciprocal rank fusion). Falls back to TF-IDF until embeddings load.',needsEmb:true,
 run:async q=>rrf(tfidfHits(q),await semHits(q)),hl:tokRe},
 similar:{name:'Similar to note (@id)',help:'Nearest notes to one note, using the vectors setting. Click ≈ on any note.',
