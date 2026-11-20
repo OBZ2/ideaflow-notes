@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ideaflow nearby</title>
+<meta name="theme-color" content="#0b0c10">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<style>
+  :root{--bg:#0b0c10;--card:#15171e;--fg:#e8e9ed;--mut:#8b90a0;--acc:#7c6cff;--acc2:#22d3ee;
+    --line:#262a35;--chip:#232734;--ok:#34d399;--warn:#fbbf24;--bad:#f87171}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+  a{color:var(--acc2);text-decoration:none}
+  header{position:sticky;top:0;z-index:5;background:rgba(11,12,16,.9);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line);padding:calc(env(safe-area-inset-top) + 10px) 16px 10px}
+  .bar{display:flex;align-items:center;gap:10px;max-width:720px;margin:0 auto}
+  .logo{font-weight:700;font-size:18px}.logo b{color:var(--acc)}
+  .bar .sp{margin-left:auto;color:var(--mut);font-size:12.5px}
+  button{background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:10px;
+    padding:7px 11px;font:inherit;font-size:13.5px;cursor:pointer}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+  a.btn{display:inline-block;background:var(--card);border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:7px 11px;font-size:13.5px;text-align:center}
+  button:disabled{opacity:.45;cursor:default}
+  main{max-width:720px;margin:0 auto;padding:14px 16px calc(env(safe-area-inset-bottom) + 40px)}
+  h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 10px}
+  .row{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px}
+  .name{font-weight:600;font-size:16px}
+  .mut{color:var(--mut);font-size:13px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all}
+  .badge{border-radius:999px;padding:2px 9px;font-size:12px;background:var(--chip);color:var(--mut);white-space:nowrap}
+  .badge.ok{background:#0f2f25;color:var(--ok)} .badge.warn{background:#33280c;color:var(--warn)}
+  .badge.bad{background:#3a1717;color:var(--bad)} .badge.fire{background:var(--acc);color:#fff}
+  .rem{border-top:1px solid var(--line);margin-top:10px;padding-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .rem .t{flex:1 1 220px;white-space:pre-wrap;word-break:break-word}
+  .rem .acts{display:flex;gap:6px}
+  #alert{display:none;border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+  details summary{cursor:pointer;color:var(--mut)}
+  label{display:block;margin:10px 0 4px;color:var(--mut);font-size:12.5px}
+  input[type=text],input[type=password]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);
+    border-radius:9px;padding:9px 10px;font:inherit;font-size:16px}
+  .err{color:var(--bad)}
+  @media (max-width:480px){.rem .acts{width:100%}.rem .acts button,.rem .acts a.btn{flex:1}}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="logo">idea<b>flow</b> nearby</div>
+  <span class="sp" id="loaded"></span>
+  <button id="refresh" aria-label="Refresh">↻</button>
+</div></header>
+<main>
+  <div id="alert" class="card"></div>
+  <div id="msg" class="mut"></div>
+
+  <h2>My network</h2>
+  <div id="mine" class="card"></div>
+
+  <h2>People</h2>
+  <div id="people"></div>
+
+  <h2>Unresolved reminders</h2>
+  <div id="unresolved" class="mut"></div>
+
+  <h2>Settings</h2>
+  <details class="card" id="settings">
+    <summary>Token, identity, salt (stored on this device only)</summary>
+    <label for="s-repo">Repo (owner/name)</label><input id="s-repo" type="text" placeholder="omarikas/ideaflow-notes">
+    <label for="s-prepo">Presence repo (optional; people.jsonl + presence.jsonl live here if set, e.g. a private repo)</label><input id="s-prepo" type="text" placeholder="same as above">
+    <label for="s-token">GitHub token (Contents read/write). Without it the page is read-only and may lag ~10 min behind Pages caching.</label>
+    <input id="s-token" type="password" autocomplete="off">
+    <label for="s-me">My person id</label><input id="s-me" type="text" placeholder="from people.jsonl (me:true)">
+    <label for="s-salt">Shared salt (same as the phone Shortcuts)</label><input id="s-salt" type="password" autocomplete="off">
+    <label><input id="s-auto" type="checkbox"> Auto-fire: write fired_at and notify when a match appears</label>
+    <div class="row" style="margin-top:12px"><button class="pri" id="s-save">Save</button>
+      <button id="s-notif">Allow notifications</button></div>
+  </details>
+</main>
+<script src="./data.js"></script>
+<script src="./remind.js"></script>
+<script>
+"use strict";
+const R = window.Remind;
+const $ = (id) => document.getElementById(id);
+const KEY = "ideaflow.remind.v1";
+const POLL_MS = 30000;
+
+function loadCfg() {
+  try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (_) { return {}; }
+}
+function saveCfg(c) { try { localStorage.setItem(KEY, JSON.stringify(c)); } catch (_) {} }
+let cfg = loadCfg();
+if (!cfg.repo) {
+  // https://<owner>.github.io/<repo>/remind.html
+  const m = /^([^.]+)\.github\.io$/.exec(location.hostname);
+  const seg = location.pathname.split("/").filter(Boolean)[0];
+  if (m && seg && !seg.endsWith(".html")) cfg.repo = m[1] + "/" + seg;
+}
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function age(msv) {
+  if (msv == null || isNaN(msv)) return "—";
+  const s = Math.max(0, Math.round(msv / 1000));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d";
+}
+const short = (k) => !k ? "—" : k.replace(/^(bssid|ssid):/, "$1 ").replace(/([0-9a-f]{10})[0-9a-f]{20,}/, "$1…");
+
+// ---- GitHub I/O (token stays in this browser) -------------------------
+function b64decode(s) {
+  const bin = atob(s.replace(/\n/g, ""));
+  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+function b64encode(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+const repoFor = (path) => (path !== "entries.jsonl" && cfg.presenceRepo) || cfg.repo;
+async function ghGet(path) {
+  const r = await fetch(`https://api.github.com/repos/${repoFor(path)}/contents/${path}?ref=main&t=${Date.now()}`,
+    { headers: { Authorization: "Bearer " + cfg.token, Accept: "application/vnd.github+json" }, cache: "no-store" });
+  if (r.status === 404) return { text: "", sha: null };
+  if (!r.ok) throw new Error(`GET ${path}: HTTP ${r.status}`);
+  const j = await r.json();
+  return { text: b64decode(j.content || ""), sha: j.sha };
+}
+async function getText(path) {
+  if (cfg.token && cfg.repo) return (await ghGet(path)).text;
+  if (cfg.presenceRepo && path !== "entries.jsonl") throw new Error("A separate presence repo needs a token.");
+  return fetchRepoText(path, cfg.repo);
+}
+// Read-modify-write entries.jsonl; retry once if someone else committed first.
+async function editEntries(fn, message) {
+  if (!cfg.token || !cfg.repo) throw new Error("Add a token in Settings to write.");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { text, sha } = await ghGet("entries.jsonl");
+    const next = fn(text);
+    if (next === text) return text;
+    const r = await fetch(`https://api.github.com/repos/${cfg.repo}/contents/entries.jsonl`, {
+      method: "PUT",
+      headers: { Authorization: "Bearer " + cfg.token, Accept: "application/vnd.github+json",
+                 "Content-Type": "application/json" },
+      body: JSON.stringify({ message, content: b64encode(next), sha, branch: "main" }),
+    });
+    if (r.ok) return next;
+    if (r.status !== 409 && r.status !== 422) throw new Error("PUT entries.jsonl: HTTP " + r.status);
+  }
+  throw new Error("entries.jsonl kept changing underneath; try again");
+}
+
+async function sha256hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- state ------------------------------------------------------------
+let data = { entries: [], people: [], presence: [] };
+let override = null;   // my network passed in the URL (?bssid=&ssid=), hashed
+let lastLoad = 0, loadErr = "", overrideErr = "";
+const notified = new Set();
+
+async function readOverride() {
+  const q = new URLSearchParams(location.search);
+  const bssid = q.get("bssid"), ssid = q.get("ssid");
+  overrideErr = "";
+  if (!bssid && !ssid) return null;
+  const hashed = (v) => /^[0-9a-f]{64}$/.test(v) ? v : (cfg.salt ? sha256hex(cfg.salt + ":" + v) : null);
+  const b = bssid ? await hashed(R.normBssid(bssid)) : "";
+  const s = ssid ? await hashed(ssid) : "";
+  if ((bssid && !b) || (ssid && !s)) { overrideErr = "Set the salt in Settings to use ?bssid / ?ssid."; return null; }
+  return { bssid: b || "", ssid: s || "", match_by: b ? "bssid" : "ssid", ts: new Date().toISOString(), device: "url" };
+}
+
+async function load() {
+  $("refresh").disabled = true;
+  try {
+    const [e, p, s] = await Promise.all(["entries.jsonl", "people.jsonl", "presence.jsonl"].map(getText));
+    data = { entries: R.parseJSONL(e), people: R.parseJSONL(p), presence: R.parseJSONL(s) };
+    lastLoad = Date.now(); loadErr = "";
+  } catch (err) { loadErr = String(err.message || err); }
+  $("refresh").disabled = false;
+  render();
+}
+
+function meId() { return cfg.me || (data.people.find((p) => p.me) || {}).id || null; }
+
+function evaluateNow() {
+  const me = meId();
+  const presence = override && me ? data.presence.concat([Object.assign({ person: me }, override)]) : data.presence;
+  return R.evaluate({ entries: data.entries, people: data.people, presence, me, now: Date.now() });
+}
+
+// ---- render -----------------------------------------------------------
+const STATE_CLS = { FIRE: "fire", "nearby, nothing pending": "ok", suppressed: "warn",
+  "different network": "", stale: "bad", "never reported": "bad", "off Wi-Fi": "", };
+
+function render() {
+  const r = evaluateNow();
+  $("loaded").textContent = lastLoad ? "loaded " + age(Date.now() - lastLoad) + " ago" + (cfg.token ? "" : " · read-only") : "";
+  const err = [loadErr, overrideErr].filter(Boolean).join(" · ");
+  $("msg").innerHTML = err ? `<span class="err">${esc(err)}</span>` : "";
+
+  const m = r.mine;
+  if (!r.me) $("mine").innerHTML = `<span class="err">No person marked "me":true in people.jsonl and none set in Settings.</span>`;
+  else if (!m) $("mine").innerHTML = `<div class="name">${esc(r.me)}</div><div class="mut">No presence report yet. Run the phone Shortcut, or open this page with ?bssid=…</div>`;
+  else $("mine").innerHTML = `
+    <div class="row"><span class="name">${esc(r.me)}</span>
+      ${badge(m.stale ? "stale" : m.on_wifi ? "on Wi-Fi" : "off Wi-Fi", m.stale ? "bad" : m.on_wifi ? "ok" : "")}
+      <span class="mut">reported ${age(m.age_ms)} ago · ${esc(m.device || "")}${m.match_by ? " · by " + esc(m.match_by) : ""}</span></div>
+    <div class="mono mut">${esc(short(R.netKey(m)))}</div>`;
+
+  $("people").innerHTML = r.rows.length ? r.rows.map(personCard).join("") :
+    `<div class="card mut">No other people in people.jsonl.</div>`;
+
+  $("unresolved").innerHTML = r.unresolved.length
+    ? r.unresolved.map((u) => `<div>“${esc(u.entry.text)}” — no alias for <b>${esc(u.name)}</b></div>`).join("")
+    : "None.";
+  maybeFire(r);
+}
+
+function badge(t, cls) { return `<span class="badge ${cls || ""}">${esc(t)}</span>`; }
+
+function personCard(row) {
+  const p = row.person, rep = row.report, sup = row.suppression;
+  const health = !rep ? badge("never seen", "bad")
+    : rep.age_ms > 6 * 3600e3 ? badge("silent " + age(rep.age_ms) + " — check Shortcut", "bad") : "";
+  const supTxt = sup.suppressed ? ` · suppressed for ${age(sup.until - Date.now())}`
+    : sup.released ? " · suppression released (left & returned)" : "";
+  const rems = row.pending.map((x) => `
+    <div class="rem"><span class="t">${row.state === "FIRE" ? "🔔 " : ""}${esc(x.entry.text)}</span>
+      <span class="acts">
+        <button data-act="done" data-id="${esc(x.entry.id)}">Done</button>
+        <button data-act="snooze" data-id="${esc(x.entry.id)}">Snooze 1h</button>
+        <a class="btn" href="./index.html?q=${encodeURIComponent(x.entry.text)}">Open</a>
+      </span></div>`).join("");
+  return `<div class="card">
+    <div class="row"><span class="name">${esc(p.name || p.id)}</span>
+      ${badge(row.state === "FIRE" ? "would fire" : row.state, STATE_CLS[row.state])}
+      ${row.match ? badge("match by " + row.match, "ok") : ""} ${health}</div>
+    <div class="mut">last report ${rep ? age(rep.age_ms) + " ago" + (rep.device ? " · " + esc(rep.device) : "") : "never"}${supTxt}
+      · ${row.pending.length} pending</div>
+    <div class="mono mut">${esc(short(R.netKey(rep)))}</div>
+    ${rems}</div>`;
+}
+
+// ---- firing -----------------------------------------------------------
+async function maybeFire(r) {
+  const due = r.rows.filter((x) => x.state === "FIRE");
+  const alertEl = $("alert");
+  if (!due.length) { alertEl.style.display = "none"; return; }
+  alertEl.style.display = "block";
+  alertEl.innerHTML = due.map((x) => `<div><b>${esc(x.person.name)}</b> is nearby: ` +
+    x.fire.map((f) => "“" + esc(f.entry.text) + "”").join(", ") + "</div>").join("") +
+    (cfg.auto && cfg.token ? "" : `<div class="mut">Auto-fire is off: nothing written, no notification.</div>`);
+  if (!cfg.auto || !cfg.token) return;
+
+  const ids = due.flatMap((x) => x.fire.map((f) => f.entry.id)).filter((id) => !notified.has(id));
+  if (!ids.length) return;
+  ids.forEach((id) => notified.add(id));
+  const now = Date.now();
+  try {
+    // fired_at first: a reminder must never fire twice, even if the page dies mid-way.
+    await editEntries((t) => ids.reduce((acc, id) => R.actions.fire(acc, id, now), t), "remind: fire " + ids.join(","));
+    for (const x of due) for (const f of x.fire) await notify(x.person, f.entry);
+  } catch (err) { loadErr = String(err.message || err); }
+  load();
+}
+
+async function notify(person, entry) {
+  const title = "Near " + (person.name || person.id);
+  const opts = { body: entry.text, tag: "remind-" + entry.id, data: { id: entry.id, text: entry.text },
+    actions: [{ action: "done", title: "Done" }, { action: "snooze", title: "Snooze 1h" }, { action: "open", title: "Open" }] };
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification(title, opts);
+  } catch (_) {
+    delete opts.actions;
+    new Notification(title, opts);
+  }
+}
+
+async function act(kind, id) {
+  try {
+    await editEntries((t) => R.actions[kind](t, id, Date.now()), `remind: ${kind} ${id}`);
+  } catch (err) { loadErr = String(err.message || err); render(); return; }
+  load();
+}
+
+// ---- wiring -----------------------------------------------------------
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  if (b) { b.disabled = true; act(b.dataset.act, b.dataset.id); }
+});
+$("refresh").addEventListener("click", load);
+$("s-repo").value = cfg.repo || ""; $("s-prepo").value = cfg.presenceRepo || ""; $("s-token").value = cfg.token || "";
+$("s-me").value = cfg.me || ""; $("s-salt").value = cfg.salt || ""; $("s-auto").checked = !!cfg.auto;
+$("s-save").addEventListener("click", async () => {
+  cfg = { repo: $("s-repo").value.trim(), presenceRepo: $("s-prepo").value.trim(), token: $("s-token").value.trim(), me: $("s-me").value.trim(),
+          salt: $("s-salt").value, auto: $("s-auto").checked };
+  saveCfg(cfg); override = await readOverride(); load();
+});
+$("s-notif").addEventListener("click", () => { if ("Notification" in window) Notification.requestPermission(); });
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", (ev) => {
+    if (ev.data && ev.data.type === "remind-action") act(ev.data.action, ev.data.id);
+  });
+}
+
+(async () => {
+  override = await readOverride();
+  // Notification action buttons route here when the page was closed.
+  const q = new URLSearchParams(location.search);
+  if (q.get("act") && q.get("id") && R.actions[q.get("act")]) {
+    const kind = q.get("act"), id = q.get("id");
+    q.delete("act"); q.delete("id");
+    history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q : ""));
+    await act(kind, id);
+  } else await load();
+  setInterval(load, POLL_MS);
+  // Tick ages; skip while a finger/mouse is down so buttons aren't swapped mid-click.
+  let pressing = false;
+  document.addEventListener("pointerdown", () => { pressing = true; });
+  document.addEventListener("pointerup", () => { setTimeout(() => { pressing = false; }, 300); });
+  setInterval(() => { if (!pressing) render(); }, 5000);
+})();
+</script>
+</body>
+</html>

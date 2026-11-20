@@ -1,6 +1,5 @@
 "use strict";
 
-const DATA = "./entries.jsonl";
 const listEl = document.getElementById("list");
 const emptyEl = document.getElementById("empty");
 const countEl = document.getElementById("count");
@@ -63,9 +62,7 @@ function render() {
 
 async function load() {
   try {
-    const res = await fetch(DATA, { cache: "no-cache" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const text = await res.text();
+    const text = await fetchRepoText("entries.jsonl");
     entries = text.split("\n").filter((l) => l.trim()).map((l) => {
       try { return JSON.parse(l); } catch { return null; }
     }).filter(Boolean).reverse();
@@ -79,6 +76,8 @@ async function load() {
   }
 }
 
+const q0 = new URLSearchParams(location.search).get("q");
+if (q0) qEl.value = q0;
 qEl.addEventListener("input", render);
 refreshEl.addEventListener("click", load);
 window.addEventListener("online", load);

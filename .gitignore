@@ -21,3 +21,5 @@
 !/projects/*/
 /projects/*/*
 !/projects/*/notes.md
+!/.github/
+!/data.js
